@@ -1,0 +1,16 @@
+# Ignore local Terraform test directory
+/test_terraform/
+*DS_Store*
+
+# GoReleaser output
+/dist/
+
+# Local provider binary builds
+/terraform-provider-komodo
+
+# GPG keys (never commit)
+*.gpg
+*.asc
+
+# Direnv / local env
+.envrc
