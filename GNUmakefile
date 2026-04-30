@@ -2,7 +2,7 @@ HOSTNAME=registry.terraform.io
 NAMESPACE=johnciavarella
 NAME=komodo
 BINARY=terraform-provider-${NAME}
-VERSION=2.0.0
+VERSION=2.0.1
 OS_ARCH=$(shell go env GOOS)_$(shell go env GOARCH)
 
 default: build
