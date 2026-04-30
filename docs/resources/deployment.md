@@ -27,15 +27,24 @@ Manages a Komodo deployment (a container deployment).
 - `environment` (String) Environment variables, newline-separated KEY=VALUE pairs.
 - `extra_args` (List of String) Extra arguments for docker run.
 - `image` (String) Docker image name (e.g. "nginx:latest") when image_type = "Image", or the build ID when image_type = "Build".
+- `image_registry_account` (String) Docker registry account (username) used to authenticate image pulls when image_type = "Image".
 - `image_type` (String) Image source type: "Image" for an external docker image, "Build" for a Komodo Build.
 - `labels` (String) Container labels, newline-separated KEY=VALUE pairs.
+- `links` (List of String) Quick links displayed in the Komodo UI for this deployment.
 - `network` (String) Docker network to connect to.
+- `poll_for_updates` (Boolean) Poll the configured registry for newer image digests.
 - `ports` (String) Port mappings, newline-separated (e.g., "8080:80\n9090:90").
+- `replicas` (Number) Number of replicas for swarm-mode deployments. Ignored for plain Docker.
 - `restart_mode` (String) Restart policy (e.g., unless-stopped, always, on-failure, no).
 - `send_alerts` (Boolean) Whether to send deployment state change alerts.
 - `server_id` (String) The server to deploy on (ID or name).
+- `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in environment.
 - `started` (Boolean) Whether the deployment container should be running. When true, runs Deploy (docker run). When false, runs DestroyDeployment (docker stop + rm). Intent-based and async.
+- `swarm_id` (String) Swarm to attach the deployment to (ID or name).
 - `tags` (List of String) List of tag names to apply to this deployment.
+- `term_signal_labels` (String) Newline-separated SIGNAL=label pairs for per-stage termination signals.
+- `termination_signal` (String) Signal sent to the container on stop (e.g. SIGTERM, SIGINT). Defaults to Docker's default if empty.
+- `termination_timeout` (Number) Seconds to wait for graceful shutdown before SIGKILL.
 - `volumes` (String) Volume mounts, newline-separated (e.g., "/host/path:/container/path").
 
 ### Read-Only

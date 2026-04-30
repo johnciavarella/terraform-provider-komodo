@@ -17,20 +17,24 @@ var _ datasource.DataSource = &ServerDataSource{}
 type ServerDataSource struct{ client *client.Client }
 
 type ServerDataSourceModel struct {
-	ID              types.String  `tfsdk:"id"`
-	Name            types.String  `tfsdk:"name"`
-	Address         types.String  `tfsdk:"address"`
-	ExternalAddress types.String  `tfsdk:"external_address"`
-	Region          types.String  `tfsdk:"region"`
-	Enabled         types.Bool    `tfsdk:"enabled"`
-	StatsMonitoring types.Bool    `tfsdk:"stats_monitoring"`
-	AutoPrune       types.Bool    `tfsdk:"auto_prune"`
-	CPUWarning      types.Float64 `tfsdk:"cpu_warning"`
-	CPUCritical     types.Float64 `tfsdk:"cpu_critical"`
-	MemWarning      types.Float64 `tfsdk:"mem_warning"`
-	MemCritical     types.Float64 `tfsdk:"mem_critical"`
-	DiskWarning     types.Float64 `tfsdk:"disk_warning"`
-	DiskCritical    types.Float64 `tfsdk:"disk_critical"`
+	ID                 types.String  `tfsdk:"id"`
+	Name               types.String  `tfsdk:"name"`
+	Address            types.String  `tfsdk:"address"`
+	ExternalAddress    types.String  `tfsdk:"external_address"`
+	Region             types.String  `tfsdk:"region"`
+	Enabled            types.Bool    `tfsdk:"enabled"`
+	InsecureTLS        types.Bool    `tfsdk:"insecure_tls"`
+	AutoRotateKeys     types.Bool    `tfsdk:"auto_rotate_keys"`
+	PeripheryPublicKey types.String  `tfsdk:"periphery_public_key"`
+	Links              types.List    `tfsdk:"links"`
+	StatsMonitoring    types.Bool    `tfsdk:"stats_monitoring"`
+	AutoPrune          types.Bool    `tfsdk:"auto_prune"`
+	CPUWarning         types.Float64 `tfsdk:"cpu_warning"`
+	CPUCritical        types.Float64 `tfsdk:"cpu_critical"`
+	MemWarning         types.Float64 `tfsdk:"mem_warning"`
+	MemCritical        types.Float64 `tfsdk:"mem_critical"`
+	DiskWarning        types.Float64 `tfsdk:"disk_warning"`
+	DiskCritical       types.Float64 `tfsdk:"disk_critical"`
 }
 
 func NewServerDataSource() datasource.DataSource { return &ServerDataSource{} }
@@ -43,20 +47,24 @@ func (d *ServerDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		Description: "Fetches a Komodo server by ID or name.",
 		Attributes: map[string]schema.Attribute{
-			"id":               schema.StringAttribute{Required: true, Description: "Server ID or name."},
-			"name":             schema.StringAttribute{Computed: true, Description: "Server name."},
-			"address":          schema.StringAttribute{Computed: true},
-			"external_address": schema.StringAttribute{Computed: true},
-			"region":           schema.StringAttribute{Computed: true},
-			"enabled":          schema.BoolAttribute{Computed: true},
-			"stats_monitoring": schema.BoolAttribute{Computed: true},
-			"auto_prune":       schema.BoolAttribute{Computed: true},
-			"cpu_warning":      schema.Float64Attribute{Computed: true},
-			"cpu_critical":     schema.Float64Attribute{Computed: true},
-			"mem_warning":      schema.Float64Attribute{Computed: true},
-			"mem_critical":     schema.Float64Attribute{Computed: true},
-			"disk_warning":     schema.Float64Attribute{Computed: true},
-			"disk_critical":    schema.Float64Attribute{Computed: true},
+			"id":                   schema.StringAttribute{Required: true, Description: "Server ID or name."},
+			"name":                 schema.StringAttribute{Computed: true, Description: "Server name."},
+			"address":              schema.StringAttribute{Computed: true},
+			"external_address":     schema.StringAttribute{Computed: true},
+			"region":               schema.StringAttribute{Computed: true},
+			"enabled":              schema.BoolAttribute{Computed: true},
+			"insecure_tls":         schema.BoolAttribute{Computed: true},
+			"auto_rotate_keys":     schema.BoolAttribute{Computed: true},
+			"periphery_public_key": schema.StringAttribute{Computed: true},
+			"links":                schema.ListAttribute{Computed: true, ElementType: types.StringType},
+			"stats_monitoring":     schema.BoolAttribute{Computed: true},
+			"auto_prune":           schema.BoolAttribute{Computed: true},
+			"cpu_warning":          schema.Float64Attribute{Computed: true},
+			"cpu_critical":         schema.Float64Attribute{Computed: true},
+			"mem_warning":          schema.Float64Attribute{Computed: true},
+			"mem_critical":         schema.Float64Attribute{Computed: true},
+			"disk_warning":         schema.Float64Attribute{Computed: true},
+			"disk_critical":        schema.Float64Attribute{Computed: true},
 		},
 	}
 }
@@ -91,8 +99,21 @@ func (d *ServerDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	config.Address = types.StringValue(server.Config.Address)
 	config.ExternalAddress = types.StringValue(server.Config.ExternalAddress)
 	config.Region = types.StringValue(server.Config.Region)
+	config.PeripheryPublicKey = types.StringValue(server.PeripheryPublicKey)
+	if len(server.Config.Links) > 0 {
+		list, _ := types.ListValueFrom(ctx, types.StringType, server.Config.Links)
+		config.Links = list
+	} else {
+		config.Links = types.ListNull(types.StringType)
+	}
 	if server.Config.Enabled != nil {
 		config.Enabled = types.BoolValue(*server.Config.Enabled)
+	}
+	if server.Config.InsecureTLS != nil {
+		config.InsecureTLS = types.BoolValue(*server.Config.InsecureTLS)
+	}
+	if server.Config.AutoRotateKeys != nil {
+		config.AutoRotateKeys = types.BoolValue(*server.Config.AutoRotateKeys)
 	}
 	if server.Config.StatsMonitoring != nil {
 		config.StatsMonitoring = types.BoolValue(*server.Config.StatsMonitoring)
@@ -132,6 +153,8 @@ type StackDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	ServerID    types.String `tfsdk:"server_id"`
+	SwarmID     types.String `tfsdk:"swarm_id"`
+	LinkedRepo  types.String `tfsdk:"linked_repo"`
 	ProjectName types.String `tfsdk:"project_name"`
 	Repo        types.String `tfsdk:"repo"`
 	Branch      types.String `tfsdk:"branch"`
@@ -151,6 +174,8 @@ func (d *StackDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 			"id":           schema.StringAttribute{Required: true, Description: "Stack ID or name."},
 			"name":         schema.StringAttribute{Computed: true},
 			"server_id":    schema.StringAttribute{Computed: true},
+			"swarm_id":     schema.StringAttribute{Computed: true},
+			"linked_repo":  schema.StringAttribute{Computed: true},
 			"project_name": schema.StringAttribute{Computed: true},
 			"repo":         schema.StringAttribute{Computed: true},
 			"branch":       schema.StringAttribute{Computed: true},
@@ -187,6 +212,8 @@ func (d *StackDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	config.ID = types.StringValue(stack.ID)
 	config.Name = types.StringValue(stack.Name)
 	config.ServerID = types.StringValue(stack.Config.ServerID)
+	config.SwarmID = types.StringValue(stack.Config.SwarmID)
+	config.LinkedRepo = types.StringValue(stack.Config.LinkedRepo)
 	config.ProjectName = types.StringValue(stack.Config.ProjectName)
 	config.Repo = types.StringValue(stack.Config.Repo)
 	config.Branch = types.StringValue(stack.Config.Branch)
@@ -202,13 +229,15 @@ var _ datasource.DataSource = &DeploymentDataSource{}
 type DeploymentDataSource struct{ client *client.Client }
 
 type DeploymentDataSourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	ServerID    types.String `tfsdk:"server_id"`
-	ImageType   types.String `tfsdk:"image_type"`
-	Image       types.String `tfsdk:"image"`
-	Network     types.String `tfsdk:"network"`
-	RestartMode types.String `tfsdk:"restart_mode"`
+	ID                   types.String `tfsdk:"id"`
+	Name                 types.String `tfsdk:"name"`
+	ServerID             types.String `tfsdk:"server_id"`
+	SwarmID              types.String `tfsdk:"swarm_id"`
+	ImageType            types.String `tfsdk:"image_type"`
+	Image                types.String `tfsdk:"image"`
+	ImageRegistryAccount types.String `tfsdk:"image_registry_account"`
+	Network              types.String `tfsdk:"network"`
+	RestartMode          types.String `tfsdk:"restart_mode"`
 }
 
 func NewDeploymentDataSource() datasource.DataSource { return &DeploymentDataSource{} }
@@ -221,13 +250,15 @@ func (d *DeploymentDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 	resp.Schema = schema.Schema{
 		Description: "Fetches a Komodo deployment by ID or name.",
 		Attributes: map[string]schema.Attribute{
-			"id":           schema.StringAttribute{Required: true, Description: "Deployment ID or name."},
-			"name":         schema.StringAttribute{Computed: true},
-			"server_id":    schema.StringAttribute{Computed: true},
-			"image_type":   schema.StringAttribute{Computed: true},
-			"image":        schema.StringAttribute{Computed: true},
-			"network":      schema.StringAttribute{Computed: true},
-			"restart_mode": schema.StringAttribute{Computed: true},
+			"id":                     schema.StringAttribute{Required: true, Description: "Deployment ID or name."},
+			"name":                   schema.StringAttribute{Computed: true},
+			"server_id":              schema.StringAttribute{Computed: true},
+			"swarm_id":               schema.StringAttribute{Computed: true},
+			"image_type":             schema.StringAttribute{Computed: true},
+			"image":                  schema.StringAttribute{Computed: true},
+			"image_registry_account": schema.StringAttribute{Computed: true},
+			"network":                schema.StringAttribute{Computed: true},
+			"restart_mode":           schema.StringAttribute{Computed: true},
 		},
 	}
 }
@@ -260,12 +291,14 @@ func (d *DeploymentDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	config.ID = types.StringValue(deployment.ID)
 	config.Name = types.StringValue(deployment.Name)
 	config.ServerID = types.StringValue(deployment.Config.ServerID)
+	config.SwarmID = types.StringValue(deployment.Config.SwarmID)
 	config.ImageType = types.StringValue(deployment.Config.Image.Type)
 	if deployment.Config.Image.Type == "Build" {
 		config.Image = types.StringValue(deployment.Config.Image.Params.BuildID)
 	} else {
 		config.Image = types.StringValue(deployment.Config.Image.Params.Image)
 	}
+	config.ImageRegistryAccount = types.StringValue(deployment.Config.ImageRegistryAccount)
 	config.Network = types.StringValue(deployment.Config.Network)
 	config.RestartMode = types.StringValue(deployment.Config.RestartMode)
 
@@ -283,6 +316,7 @@ type BuildDataSourceModel struct {
 	Name        types.String `tfsdk:"name"`
 	BuilderID   types.String `tfsdk:"builder_id"`
 	ImageName   types.String `tfsdk:"image_name"`
+	LinkedRepo  types.String `tfsdk:"linked_repo"`
 	Repo        types.String `tfsdk:"repo"`
 	Branch      types.String `tfsdk:"branch"`
 	GitProvider types.String `tfsdk:"git_provider"`
@@ -302,6 +336,7 @@ func (d *BuildDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 			"name":         schema.StringAttribute{Computed: true},
 			"builder_id":   schema.StringAttribute{Computed: true},
 			"image_name":   schema.StringAttribute{Computed: true},
+			"linked_repo":  schema.StringAttribute{Computed: true},
 			"repo":         schema.StringAttribute{Computed: true},
 			"branch":       schema.StringAttribute{Computed: true},
 			"git_provider": schema.StringAttribute{Computed: true},
@@ -338,6 +373,7 @@ func (d *BuildDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	config.Name = types.StringValue(build.Name)
 	config.BuilderID = types.StringValue(build.Config.BuilderID)
 	config.ImageName = types.StringValue(build.Config.ImageName)
+	config.LinkedRepo = types.StringValue(build.Config.LinkedRepo)
 	config.Repo = types.StringValue(build.Config.Repo)
 	config.Branch = types.StringValue(build.Config.Branch)
 	config.GitProvider = types.StringValue(build.Config.GitProvider)
@@ -355,8 +391,10 @@ type RepoDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	ServerID    types.String `tfsdk:"server_id"`
+	BuilderID   types.String `tfsdk:"builder_id"`
 	Repo        types.String `tfsdk:"repo"`
 	Branch      types.String `tfsdk:"branch"`
+	Path        types.String `tfsdk:"path"`
 	GitProvider types.String `tfsdk:"git_provider"`
 }
 
@@ -373,8 +411,10 @@ func (d *RepoDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 			"id":           schema.StringAttribute{Required: true, Description: "Repo ID or name."},
 			"name":         schema.StringAttribute{Computed: true},
 			"server_id":    schema.StringAttribute{Computed: true},
+			"builder_id":   schema.StringAttribute{Computed: true},
 			"repo":         schema.StringAttribute{Computed: true},
 			"branch":       schema.StringAttribute{Computed: true},
+			"path":         schema.StringAttribute{Computed: true},
 			"git_provider": schema.StringAttribute{Computed: true},
 		},
 	}
@@ -408,8 +448,10 @@ func (d *RepoDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	config.ID = types.StringValue(repo.ID)
 	config.Name = types.StringValue(repo.Name)
 	config.ServerID = types.StringValue(repo.Config.ServerID)
+	config.BuilderID = types.StringValue(repo.Config.BuilderID)
 	config.Repo = types.StringValue(repo.Config.Repo)
 	config.Branch = types.StringValue(repo.Config.Branch)
+	config.Path = types.StringValue(repo.Config.Path)
 	config.GitProvider = types.StringValue(repo.Config.GitProvider)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)

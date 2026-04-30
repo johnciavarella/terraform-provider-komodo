@@ -23,15 +23,20 @@ Manages a Komodo server (a machine running Komodo Periphery).
 
 - `address` (String) HTTP address of the Periphery client (e.g., http://192.168.1.100:8120).
 - `auto_prune` (Boolean) Whether to trigger docker image prune every 24 hours.
+- `auto_rotate_keys` (Boolean) Whether Komodo should automatically rotate the Periphery keypair as part of RotateAllServerKeys.
 - `cpu_critical` (Number) CPU critical threshold percentage.
 - `cpu_warning` (Number) CPU warning threshold percentage.
 - `disk_critical` (Number) Disk critical threshold percentage.
 - `disk_warning` (Number) Disk warning threshold percentage.
 - `enabled` (Boolean) Whether the server is enabled.
 - `external_address` (String) External address used for container links. If empty, uses the address field.
+- `ignore_mounts` (List of String) Mount paths excluded from disk-stats reporting.
+- `insecure_tls` (Boolean) Skip TLS certificate validation when Core connects to Periphery. Defaults to true because Periphery typically presents a self-signed cert.
+- `links` (List of String) Quick links displayed in the Komodo UI for this server.
 - `mem_critical` (Number) Memory critical threshold percentage.
 - `mem_warning` (Number) Memory warning threshold percentage.
-- `passkey` (String, Sensitive) Passkey for authenticating with Periphery.
+- `passkey` (String, Sensitive, Deprecated) Deprecated: replaced by Komodo's automatic PKI key rotation in v2. Retained for backwards compatibility only; use periphery_public_key instead.
+- `periphery_public_key` (String) SPKI base64 public key for the Periphery agent. If set, Komodo accepts only that key. If unset, Komodo records the key Periphery presents on first contact.
 - `region` (String) Region label for the server.
 - `send_cpu_alerts` (Boolean) Whether to send alerts about CPU status.
 - `send_disk_alerts` (Boolean) Whether to send alerts about disk status.

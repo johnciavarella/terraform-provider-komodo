@@ -23,14 +23,18 @@ Fetches a Komodo server by ID or name.
 
 - `address` (String)
 - `auto_prune` (Boolean)
+- `auto_rotate_keys` (Boolean)
 - `cpu_critical` (Number)
 - `cpu_warning` (Number)
 - `disk_critical` (Number)
 - `disk_warning` (Number)
 - `enabled` (Boolean)
 - `external_address` (String)
+- `insecure_tls` (Boolean)
+- `links` (List of String)
 - `mem_critical` (Number)
 - `mem_warning` (Number)
 - `name` (String) Server name.
+- `periphery_public_key` (String)
 - `region` (String)
 - `stats_monitoring` (Boolean)

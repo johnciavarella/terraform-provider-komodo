@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,13 +36,20 @@ type Client struct {
 }
 
 // NewClient constructs a Komodo API client.
-func NewClient(baseURL, apiKey, apiSecret, userAgent string) *Client {
+// insecureSkipVerify disables TLS certificate verification — only use for
+// local-test instances behind self-signed certs.
+func NewClient(baseURL, apiKey, apiSecret, userAgent string, insecureSkipVerify bool) *Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if insecureSkipVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	return &Client{
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
 		APISecret: apiSecret,
 		HTTPClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout:   60 * time.Second,
+			Transport: transport,
 		},
 		UserAgent: userAgent,
 	}
@@ -180,6 +188,10 @@ type ServerConfig struct {
 	Region                    string   `json:"region,omitempty"`
 	Enabled                   *bool    `json:"enabled,omitempty"`
 	Passkey                   string   `json:"passkey,omitempty"`
+	InsecureTLS               *bool    `json:"insecure_tls,omitempty"`
+	AutoRotateKeys            *bool    `json:"auto_rotate_keys,omitempty"`
+	IgnoreMounts              []string `json:"ignore_mounts,omitempty"`
+	Links                     []string `json:"links,omitempty"`
 	StatsMonitoring           *bool    `json:"stats_monitoring,omitempty"`
 	AutoPrune                 *bool    `json:"auto_prune,omitempty"`
 	SendUnreachableAlerts     *bool    `json:"send_unreachable_alerts,omitempty"`
@@ -196,18 +208,20 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	ID     string       `json:"-"`
-	Name   string       `json:"name"`
-	Tags   []string     `json:"tags,omitempty"`
-	Config ServerConfig `json:"config"`
+	ID                 string       `json:"-"`
+	Name               string       `json:"name"`
+	Tags               []string     `json:"tags,omitempty"`
+	Config             ServerConfig `json:"config"`
+	PeripheryPublicKey string       `json:"-"`
 }
 
 func (s *Server) UnmarshalJSON(data []byte) error {
 	type alias struct {
-		ID     json.RawMessage `json:"_id"`
-		Name   string          `json:"name"`
-		Tags   []string        `json:"tags,omitempty"`
-		Config ServerConfig    `json:"config"`
+		ID                 json.RawMessage `json:"_id"`
+		Name               string          `json:"name"`
+		Tags               []string        `json:"tags,omitempty"`
+		Config             ServerConfig    `json:"config"`
+		PeripheryPublicKey string          `json:"periphery_public_key,omitempty"`
 	}
 	var a alias
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -217,6 +231,7 @@ func (s *Server) UnmarshalJSON(data []byte) error {
 	s.Name = a.Name
 	s.Tags = a.Tags
 	s.Config = a.Config
+	s.PeripheryPublicKey = a.PeripheryPublicKey
 	return nil
 }
 
@@ -269,6 +284,13 @@ func (c *Client) DeleteServer(ctx context.Context, id string) error {
 	return c.Write(ctx, "DeleteServer", IDParam{ID: id}, nil)
 }
 
+func (c *Client) UpdateServerPublicKey(ctx context.Context, server, publicKey string) error {
+	return c.Write(ctx, "UpdateServerPublicKey", map[string]string{
+		"server":     server,
+		"public_key": publicKey,
+	}, nil)
+}
+
 func (c *Client) ListServers(ctx context.Context) ([]Server, error) {
 	var servers []Server
 	err := c.Read(ctx, "ListServers", struct{}{}, &servers)
@@ -283,37 +305,73 @@ type SystemCommand struct {
 	Command string `json:"command"`
 }
 
+// AdditionalEnvFile is the v2 shape of stack additional_env_files entries
+// (was a plain string in v1). The Komodo backend's custom deserializer
+// also accepts a bare string for backwards compatibility on read.
+type AdditionalEnvFile struct {
+	Path  string `json:"path"`
+	Track bool   `json:"track"`
+}
+
+// UnmarshalJSON tolerates legacy v1 payloads where additional_env_files
+// elements were plain strings.
+func (a *AdditionalEnvFile) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		a.Path = s
+		a.Track = true
+		return nil
+	}
+	type alias AdditionalEnvFile
+	var v alias
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*a = AdditionalEnvFile(v)
+	return nil
+}
+
 type StackConfig struct {
-	ServerID             string         `json:"server_id,omitempty"`
-	ProjectName          string         `json:"project_name,omitempty"`
-	AutoPull             *bool          `json:"auto_pull,omitempty"`
-	RunBuild             *bool          `json:"run_build,omitempty"`
-	AutoUpdate           *bool          `json:"auto_update,omitempty"`
-	DestroyBeforeDeploy  *bool          `json:"destroy_before_deploy,omitempty"`
-	GitProvider          string         `json:"git_provider,omitempty"`
-	GitHTTPS             *bool          `json:"git_https,omitempty"`
-	GitAccount           string         `json:"git_account,omitempty"`
-	RegistryProvider     string         `json:"registry_provider,omitempty"`
-	RegistryAccount      string         `json:"registry_account,omitempty"`
-	Repo                 string         `json:"repo,omitempty"`
-	Branch               string         `json:"branch,omitempty"`
-	Commit               string         `json:"commit,omitempty"`
-	FilesOnHost          *bool          `json:"files_on_host,omitempty"`
-	RunDirectory         string         `json:"run_directory,omitempty"`
-	FilePaths            []string       `json:"file_paths,omitempty"`
-	FileContents         string         `json:"file_contents,omitempty"`
-	Environment          string         `json:"environment,omitempty"`
-	EnvFilePath          string         `json:"env_file_path,omitempty"`
-	AdditionalEnvFiles   []string       `json:"additional_env_files,omitempty"`
-	WebhookEnabled       *bool          `json:"webhook_enabled,omitempty"`
-	WebhookSecret        string         `json:"webhook_secret,omitempty"`
-	WebhookForceDeploy   *bool          `json:"webhook_force_deploy,omitempty"`
-	PreDeploy            *SystemCommand `json:"pre_deploy,omitempty"`
-	PostDeploy           *SystemCommand `json:"post_deploy,omitempty"`
-	ExtraArgs            []string       `json:"extra_args,omitempty"`
-	BuildExtraArgs       []string       `json:"build_extra_args,omitempty"`
-	IgnoreServices       []string       `json:"ignore_services,omitempty"`
-	SendAlerts           *bool          `json:"send_alerts,omitempty"`
+	ServerID                 string              `json:"server_id,omitempty"`
+	SwarmID                  string              `json:"swarm_id,omitempty"`
+	Links                    []string            `json:"links,omitempty"`
+	ProjectName              string              `json:"project_name,omitempty"`
+	AutoPull                 *bool               `json:"auto_pull,omitempty"`
+	RunBuild                 *bool               `json:"run_build,omitempty"`
+	PollForUpdates           *bool               `json:"poll_for_updates,omitempty"`
+	AutoUpdate               *bool               `json:"auto_update,omitempty"`
+	AutoUpdateAllServices    *bool               `json:"auto_update_all_services,omitempty"`
+	DestroyBeforeDeploy      *bool               `json:"destroy_before_deploy,omitempty"`
+	SkipSecretInterp         *bool               `json:"skip_secret_interp,omitempty"`
+	LinkedRepo               string              `json:"linked_repo,omitempty"`
+	GitProvider              string              `json:"git_provider,omitempty"`
+	GitHTTPS                 *bool               `json:"git_https,omitempty"`
+	GitAccount               string              `json:"git_account,omitempty"`
+	RegistryProvider         string              `json:"registry_provider,omitempty"`
+	RegistryAccount          string              `json:"registry_account,omitempty"`
+	Repo                     string              `json:"repo,omitempty"`
+	Branch                   string              `json:"branch,omitempty"`
+	Commit                   string              `json:"commit,omitempty"`
+	ClonePath                string              `json:"clone_path,omitempty"`
+	Reclone                  *bool               `json:"reclone,omitempty"`
+	FilesOnHost              *bool               `json:"files_on_host,omitempty"`
+	RunDirectory             string              `json:"run_directory,omitempty"`
+	FilePaths                []string            `json:"file_paths,omitempty"`
+	FileContents             string              `json:"file_contents,omitempty"`
+	Environment              string              `json:"environment,omitempty"`
+	EnvFilePath              string              `json:"env_file_path,omitempty"`
+	AdditionalEnvFiles       []AdditionalEnvFile `json:"additional_env_files,omitempty"`
+	WebhookEnabled           *bool               `json:"webhook_enabled,omitempty"`
+	WebhookSecret            string              `json:"webhook_secret,omitempty"`
+	WebhookForceDeploy       *bool               `json:"webhook_force_deploy,omitempty"`
+	PreDeploy                *SystemCommand      `json:"pre_deploy,omitempty"`
+	PostDeploy               *SystemCommand      `json:"post_deploy,omitempty"`
+	ExtraArgs                []string            `json:"extra_args,omitempty"`
+	BuildExtraArgs           []string            `json:"build_extra_args,omitempty"`
+	ComposeCmdWrapper        string              `json:"compose_cmd_wrapper,omitempty"`
+	ComposeCmdWrapperInclude []string            `json:"compose_cmd_wrapper_include,omitempty"`
+	IgnoreServices           []string            `json:"ignore_services,omitempty"`
+	SendAlerts               *bool               `json:"send_alerts,omitempty"`
 }
 
 type Stack struct {
@@ -431,19 +489,28 @@ type DeploymentImageParams struct {
 }
 
 type DeploymentConfig struct {
-	ServerID    string          `json:"server_id,omitempty"`
-	Image       DeploymentImage `json:"image"`
-	Network     string          `json:"network,omitempty"`
-	RestartMode string          `json:"restart,omitempty"`
-	Ports       string          `json:"ports,omitempty"`
-	Volumes     string          `json:"volumes,omitempty"`
-	Environment string          `json:"environment,omitempty"`
-	Labels      string          `json:"labels,omitempty"`
-	ExtraArgs   []string        `json:"extra_args,omitempty"`
-	Command     string          `json:"command,omitempty"`
-	SendAlerts  *bool           `json:"send_alerts,omitempty"`
-	AutoUpdate  *bool           `json:"auto_update,omitempty"`
-	Redeploy    *bool           `json:"redeploy_on_build,omitempty"`
+	ServerID             string          `json:"server_id,omitempty"`
+	SwarmID              string          `json:"swarm_id,omitempty"`
+	Image                DeploymentImage `json:"image"`
+	ImageRegistryAccount string          `json:"image_registry_account,omitempty"`
+	SkipSecretInterp     *bool           `json:"skip_secret_interp,omitempty"`
+	PollForUpdates       *bool           `json:"poll_for_updates,omitempty"`
+	Links                []string        `json:"links,omitempty"`
+	Network              string          `json:"network,omitempty"`
+	RestartMode          string          `json:"restart,omitempty"`
+	Replicas             *int            `json:"replicas,omitempty"`
+	TerminationSignal    string          `json:"termination_signal,omitempty"`
+	TerminationTimeout   *int            `json:"termination_timeout,omitempty"`
+	TermSignalLabels     string          `json:"term_signal_labels,omitempty"`
+	Ports                string          `json:"ports,omitempty"`
+	Volumes              string          `json:"volumes,omitempty"`
+	Environment          string          `json:"environment,omitempty"`
+	Labels               string          `json:"labels,omitempty"`
+	ExtraArgs            []string        `json:"extra_args,omitempty"`
+	Command              string          `json:"command,omitempty"`
+	SendAlerts           *bool           `json:"send_alerts,omitempty"`
+	AutoUpdate           *bool           `json:"auto_update,omitempty"`
+	Redeploy             *bool           `json:"redeploy_on_build,omitempty"`
 }
 
 type Deployment struct {
@@ -513,26 +580,43 @@ func (c *Client) DestroyDeployment(ctx context.Context, idOrName string) error {
 
 // ---- Build ----
 
+// ImageRegistryConfig describes a registry to push a built image to.
+type ImageRegistryConfig struct {
+	Domain       string `json:"domain"`
+	Account      string `json:"account"`
+	Organization string `json:"organization"`
+}
+
 type BuildConfig struct {
-	BuilderID            string   `json:"builder_id,omitempty"`
-	ImageName            string   `json:"image_name,omitempty"`
-	ImageTag             string   `json:"image_tag,omitempty"`
-	AutoIncrementVersion *bool    `json:"auto_increment_version,omitempty"`
-	GitProvider          string   `json:"git_provider,omitempty"`
-	GitHTTPS             *bool    `json:"git_https,omitempty"`
-	GitAccount           string   `json:"git_account,omitempty"`
-	Repo                 string   `json:"repo,omitempty"`
-	Branch               string   `json:"branch,omitempty"`
-	Commit               string   `json:"commit,omitempty"`
-	BuildPath            string   `json:"build_path,omitempty"`
-	DockerfilePath       string   `json:"dockerfile_path,omitempty"`
-	UseBuildx            *bool    `json:"use_buildx,omitempty"`
-	ExtraArgs            []string `json:"extra_args,omitempty"`
-	BuildArgs            string   `json:"build_args,omitempty"`
-	SecretArgs           string   `json:"secret_args,omitempty"`
-	Labels               string   `json:"labels,omitempty"`
-	WebhookEnabled       *bool    `json:"webhook_enabled,omitempty"`
-	FilesOnHost          *bool    `json:"files_on_host,omitempty"`
+	BuilderID            string                `json:"builder_id,omitempty"`
+	ImageName            string                `json:"image_name,omitempty"`
+	ImageTag             string                `json:"image_tag,omitempty"`
+	AutoIncrementVersion *bool                 `json:"auto_increment_version,omitempty"`
+	IncludeLatestTag     *bool                 `json:"include_latest_tag,omitempty"`
+	IncludeVersionTags   *bool                 `json:"include_version_tags,omitempty"`
+	IncludeCommitTag     *bool                 `json:"include_commit_tag,omitempty"`
+	Links                []string              `json:"links,omitempty"`
+	LinkedRepo           string                `json:"linked_repo,omitempty"`
+	GitProvider          string                `json:"git_provider,omitempty"`
+	GitHTTPS             *bool                 `json:"git_https,omitempty"`
+	GitAccount           string                `json:"git_account,omitempty"`
+	Repo                 string                `json:"repo,omitempty"`
+	Branch               string                `json:"branch,omitempty"`
+	Commit               string                `json:"commit,omitempty"`
+	WebhookEnabled       *bool                 `json:"webhook_enabled,omitempty"`
+	WebhookSecret        string                `json:"webhook_secret,omitempty"`
+	FilesOnHost          *bool                 `json:"files_on_host,omitempty"`
+	BuildPath            string                `json:"build_path,omitempty"`
+	DockerfilePath       string                `json:"dockerfile_path,omitempty"`
+	Dockerfile           string                `json:"dockerfile,omitempty"`
+	ImageRegistry        []ImageRegistryConfig `json:"image_registry,omitempty"`
+	SkipSecretInterp     *bool                 `json:"skip_secret_interp,omitempty"`
+	UseBuildx            *bool                 `json:"use_buildx,omitempty"`
+	ExtraArgs            []string              `json:"extra_args,omitempty"`
+	PreBuild             *SystemCommand        `json:"pre_build,omitempty"`
+	BuildArgs            string                `json:"build_args,omitempty"`
+	SecretArgs           string                `json:"secret_args,omitempty"`
+	Labels               string                `json:"labels,omitempty"`
 }
 
 type Build struct {
@@ -595,16 +679,23 @@ func (c *Client) DeleteBuild(ctx context.Context, id string) error {
 // ---- Repo ----
 
 type RepoConfig struct {
-	ServerID       string `json:"server_id,omitempty"`
-	GitProvider    string `json:"git_provider,omitempty"`
-	GitHTTPS       *bool  `json:"git_https,omitempty"`
-	GitAccount     string `json:"git_account,omitempty"`
-	Repo           string `json:"repo,omitempty"`
-	Branch         string `json:"branch,omitempty"`
-	Commit         string `json:"commit,omitempty"`
-	OnClone        string `json:"on_clone,omitempty"`
-	OnPull         string `json:"on_pull,omitempty"`
-	WebhookEnabled *bool  `json:"webhook_enabled,omitempty"`
+	ServerID         string         `json:"server_id,omitempty"`
+	BuilderID        string         `json:"builder_id,omitempty"`
+	GitProvider      string         `json:"git_provider,omitempty"`
+	GitHTTPS         *bool          `json:"git_https,omitempty"`
+	GitAccount       string         `json:"git_account,omitempty"`
+	Repo             string         `json:"repo,omitempty"`
+	Branch           string         `json:"branch,omitempty"`
+	Commit           string         `json:"commit,omitempty"`
+	Path             string         `json:"path,omitempty"`
+	OnClone          *SystemCommand `json:"on_clone,omitempty"`
+	OnPull           *SystemCommand `json:"on_pull,omitempty"`
+	WebhookEnabled   *bool          `json:"webhook_enabled,omitempty"`
+	WebhookSecret    string         `json:"webhook_secret,omitempty"`
+	Links            []string       `json:"links,omitempty"`
+	Environment      string         `json:"environment,omitempty"`
+	EnvFilePath      string         `json:"env_file_path,omitempty"`
+	SkipSecretInterp *bool          `json:"skip_secret_interp,omitempty"`
 }
 
 type Repo struct {
@@ -724,9 +815,9 @@ func (c *Client) RenameTag(ctx context.Context, id string, name string) (*Tag, e
 	return &t, err
 }
 
-func (c *Client) UpdateTagColor(ctx context.Context, id string, color string) (*Tag, error) {
+func (c *Client) UpdateTagColor(ctx context.Context, idOrName string, color string) (*Tag, error) {
 	var t Tag
-	err := c.Write(ctx, "UpdateTagColor", map[string]string{"id": id, "color": color}, &t)
+	err := c.Write(ctx, "UpdateTagColor", map[string]string{"tag": idOrName, "color": color}, &t)
 	return &t, err
 }
 
@@ -755,8 +846,52 @@ func (c *Client) UpdateResourceMeta(ctx context.Context, targetType, id string, 
 
 // ---- Builder ----
 
+// BuilderConfig is an adjacently-tagged enum on the wire:
+//
+//	{"type": "Server", "params": {"server_id": "..."}}
+//	{"type": "Url",    "params": {...}}
+//	{"type": "Aws",    "params": {...}}
+//
+// The provider currently exposes only the "Server" variant. Custom Marshal /
+// Unmarshal keep the Go-side shape flat so callers can use Config.ServerID.
 type BuilderConfig struct {
-	ServerID string `json:"server_id,omitempty"`
+	ServerID string `json:"-"`
+}
+
+func (c BuilderConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type   string `json:"type"`
+		Params struct {
+			ServerID string `json:"server_id,omitempty"`
+		} `json:"params"`
+	}{
+		Type: "Server",
+		Params: struct {
+			ServerID string `json:"server_id,omitempty"`
+		}{ServerID: c.ServerID},
+	})
+}
+
+func (c *BuilderConfig) UnmarshalJSON(data []byte) error {
+	var wrapper struct {
+		Type   string `json:"type"`
+		Params struct {
+			ServerID string `json:"server_id,omitempty"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		// Fall back to flat decode for backwards compatibility.
+		var flat struct {
+			ServerID string `json:"server_id,omitempty"`
+		}
+		if err2 := json.Unmarshal(data, &flat); err2 != nil {
+			return err
+		}
+		c.ServerID = flat.ServerID
+		return nil
+	}
+	c.ServerID = wrapper.Params.ServerID
+	return nil
 }
 
 type Builder struct {
@@ -877,11 +1012,14 @@ func (c *Client) FindUser(ctx context.Context, idOrName string) (*User, error) {
 }
 
 func (c *Client) UpdateUserBasePermissions(ctx context.Context, userID string, enabled, createServer, createBuild bool) error {
+	// Note the v2 request-side field renames: `create_servers` / `create_builds`.
+	// The corresponding response fields on the User struct are still
+	// `create_server_permissions` / `create_build_permissions`.
 	return c.Write(ctx, "UpdateUserBasePermissions", map[string]interface{}{
-		"user_id":                   userID,
-		"enabled":                   enabled,
-		"create_server_permissions": createServer,
-		"create_build_permissions":  createBuild,
+		"user_id":        userID,
+		"enabled":        enabled,
+		"create_servers": createServer,
+		"create_builds":  createBuild,
 	}, nil)
 }
 
@@ -914,6 +1052,114 @@ func (c *Client) CreateApiKeyForServiceUser(ctx context.Context, userID, name st
 
 func (c *Client) DeleteApiKeyForServiceUser(ctx context.Context, key string) error {
 	return c.Write(ctx, "DeleteApiKeyForServiceUser", map[string]string{"key": key}, nil)
+}
+
+// ---- Onboarding Keys ----
+
+// OnboardingKey is a server bootstrap credential. Periphery presents the
+// matching private key on first contact and Core registers a Server using
+// this key's settings.
+type OnboardingKey struct {
+	ID            string   `json:"-"`
+	Name          string   `json:"name"`
+	PublicKey     string   `json:"public_key"`
+	Enabled       bool     `json:"enabled"`
+	Expires       int64    `json:"expires"`
+	Privileged    bool     `json:"privileged"`
+	CopyServer    string   `json:"copy_server,omitempty"`
+	CreateBuilder bool     `json:"create_builder"`
+	Tags          []string `json:"tags,omitempty"`
+}
+
+func (k *OnboardingKey) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		ID            json.RawMessage `json:"_id"`
+		Name          string          `json:"name"`
+		PublicKey     string          `json:"public_key"`
+		Enabled       bool            `json:"enabled"`
+		Expires       int64           `json:"expires"`
+		Privileged    bool            `json:"privileged"`
+		CopyServer    string          `json:"copy_server,omitempty"`
+		CreateBuilder bool            `json:"create_builder"`
+		Tags          []string        `json:"tags,omitempty"`
+	}
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	k.ID = parseMongoID(a.ID)
+	k.Name = a.Name
+	k.PublicKey = a.PublicKey
+	k.Enabled = a.Enabled
+	k.Expires = a.Expires
+	k.Privileged = a.Privileged
+	k.CopyServer = a.CopyServer
+	k.CreateBuilder = a.CreateBuilder
+	k.Tags = a.Tags
+	return nil
+}
+
+type CreateOnboardingKeyParams struct {
+	Name          string   `json:"name"`
+	Expires       int64    `json:"expires"`
+	PrivateKey    string   `json:"private_key,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	Privileged    bool     `json:"privileged"`
+	CopyServer    string   `json:"copy_server,omitempty"`
+	CreateBuilder bool     `json:"create_builder"`
+}
+
+type CreateOnboardingKeyResponse struct {
+	PrivateKey string        `json:"private_key"`
+	Created    OnboardingKey `json:"created"`
+}
+
+type UpdateOnboardingKeyParams struct {
+	PublicKey     string    `json:"public_key"`
+	Name          *string   `json:"name,omitempty"`
+	Enabled       *bool     `json:"enabled,omitempty"`
+	Expires       *int64    `json:"expires,omitempty"`
+	Tags          *[]string `json:"tags,omitempty"`
+	Privileged    *bool     `json:"privileged,omitempty"`
+	CopyServer    *string   `json:"copy_server,omitempty"`
+	CreateBuilder *bool     `json:"create_builder,omitempty"`
+}
+
+func (c *Client) CreateOnboardingKey(ctx context.Context, params CreateOnboardingKeyParams) (*CreateOnboardingKeyResponse, error) {
+	var r CreateOnboardingKeyResponse
+	err := c.Write(ctx, "CreateOnboardingKey", params, &r)
+	return &r, err
+}
+
+func (c *Client) UpdateOnboardingKey(ctx context.Context, params UpdateOnboardingKeyParams) (*OnboardingKey, error) {
+	var k OnboardingKey
+	err := c.Write(ctx, "UpdateOnboardingKey", params, &k)
+	return &k, err
+}
+
+func (c *Client) DeleteOnboardingKey(ctx context.Context, publicKey string) error {
+	return c.Write(ctx, "DeleteOnboardingKey", map[string]string{"public_key": publicKey}, nil)
+}
+
+func (c *Client) ListOnboardingKeys(ctx context.Context) ([]OnboardingKey, error) {
+	var keys []OnboardingKey
+	err := c.Read(ctx, "ListOnboardingKeys", struct{}{}, &keys)
+	return keys, err
+}
+
+// FindOnboardingKey returns the first onboarding key matching the given public_key.
+// Komodo has no GetOnboardingKey by ID; reads always go through ListOnboardingKeys.
+func (c *Client) FindOnboardingKey(ctx context.Context, publicKey string) (*OnboardingKey, error) {
+	keys, err := c.ListOnboardingKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range keys {
+		if keys[i].PublicKey == publicKey {
+			return &keys[i], nil
+		}
+	}
+	return nil, &NotFoundError{Message: fmt.Sprintf("onboarding key with public_key %q not found", publicKey)}
 }
 
 // ---- Git Provider Accounts ----
@@ -1064,4 +1310,12 @@ func BoolPtr(b bool) *bool {
 
 func Float64Ptr(f float64) *float64 {
 	return &f
+}
+
+func IntPtr(i int) *int {
+	return &i
+}
+
+func StringPtr(s string) *string {
+	return &s
 }

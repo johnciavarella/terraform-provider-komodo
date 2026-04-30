@@ -20,9 +20,10 @@ type KomodoProvider struct {
 }
 
 type KomodoProviderModel struct {
-	APIKey    types.String `tfsdk:"api_key"`
-	APISecret types.String `tfsdk:"api_secret"`
-	BaseURL   types.String `tfsdk:"base_url"`
+	APIKey             types.String `tfsdk:"api_key"`
+	APISecret          types.String `tfsdk:"api_secret"`
+	BaseURL            types.String `tfsdk:"base_url"`
+	InsecureSkipVerify types.Bool   `tfsdk:"insecure_skip_verify"`
 }
 
 func New(version string) func() provider.Provider {
@@ -52,6 +53,10 @@ func (p *KomodoProvider) Schema(_ context.Context, _ provider.SchemaRequest, res
 			},
 			"base_url": schema.StringAttribute{
 				Description: "Base URL of the Komodo Core API (e.g., https://komodo.example.com). Can also be set via the KOMODO_ADDRESS environment variable.",
+				Optional:    true,
+			},
+			"insecure_skip_verify": schema.BoolAttribute{
+				Description: "Skip TLS certificate verification when calling Komodo Core. Use only for local-test instances behind self-signed certs.",
 				Optional:    true,
 			},
 		},
@@ -104,10 +109,34 @@ func (p *KomodoProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		return
 	}
 
-	c := client.NewClient(baseURL, apiKey, apiSecret, "terraform-provider-komodo/"+p.version)
+	insecureSkipVerify := config.InsecureSkipVerify.ValueBool()
+	c := client.NewClient(baseURL, apiKey, apiSecret, "terraform-provider-komodo/"+p.version, insecureSkipVerify)
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+// preserveServerIDName chooses the friendliest representation of a server
+// reference for state. It returns:
+//   - the user's existing name-form value if it resolves to the API's
+//     canonical ID (avoids "Local"→ObjectID drift on round-trips);
+//   - the server's display name on a fresh state (e.g. terraform import),
+//     so users typing `server_id = "Local"` in config see no diff after
+//     `terraform import` of an existing resource;
+//   - the canonical ID as a last resort.
+func preserveServerIDName(ctx context.Context, c *client.Client, currentID, apiID string) string {
+	if currentID != "" && currentID == apiID {
+		return apiID
+	}
+	if currentID != "" && resolveServerID(ctx, c, currentID) == apiID {
+		return currentID
+	}
+	if currentID == "" && apiID != "" && c != nil {
+		if s, err := c.GetServer(ctx, apiID); err == nil && s.Name != "" {
+			return s.Name
+		}
+	}
+	return apiID
 }
 
 // resolveServerID looks up the server by name/ID and returns its canonical ID.
@@ -204,6 +233,7 @@ func (p *KomodoProvider) Resources(_ context.Context) []func() resource.Resource
 		NewApiKeyResource,
 		NewGitProviderAccountResource,
 		NewDockerRegistryAccountResource,
+		NewOnboardingKeyResource,
 	}
 }
 

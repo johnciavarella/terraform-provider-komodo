@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -11,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -29,24 +31,33 @@ type DeploymentResource struct {
 }
 
 type DeploymentResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	ServerID    types.String `tfsdk:"server_id"`
-	ImageType   types.String `tfsdk:"image_type"`
-	Image       types.String `tfsdk:"image"`
-	Network     types.String `tfsdk:"network"`
-	RestartMode types.String `tfsdk:"restart_mode"`
-	Command     types.String `tfsdk:"command"`
-	SendAlerts  types.Bool   `tfsdk:"send_alerts"`
-	AutoUpdate  types.Bool   `tfsdk:"auto_update"`
-	Ports       types.String `tfsdk:"ports"`
-	Volumes     types.String `tfsdk:"volumes"`
-	Environment types.String `tfsdk:"environment"`
-	Labels      types.String `tfsdk:"labels"`
-	ExtraArgs   types.List   `tfsdk:"extra_args"`
-	Started     types.Bool   `tfsdk:"started"`
-	Deployed    types.Bool   `tfsdk:"deployed"`
-	Tags        types.List   `tfsdk:"tags"`
+	ID                   types.String `tfsdk:"id"`
+	Name                 types.String `tfsdk:"name"`
+	ServerID             types.String `tfsdk:"server_id"`
+	SwarmID              types.String `tfsdk:"swarm_id"`
+	ImageType            types.String `tfsdk:"image_type"`
+	Image                types.String `tfsdk:"image"`
+	ImageRegistryAccount types.String `tfsdk:"image_registry_account"`
+	SkipSecretInterp     types.Bool   `tfsdk:"skip_secret_interp"`
+	PollForUpdates       types.Bool   `tfsdk:"poll_for_updates"`
+	Links                types.List   `tfsdk:"links"`
+	Network              types.String `tfsdk:"network"`
+	RestartMode          types.String `tfsdk:"restart_mode"`
+	Replicas             types.Int64  `tfsdk:"replicas"`
+	TerminationSignal    types.String `tfsdk:"termination_signal"`
+	TerminationTimeout   types.Int64  `tfsdk:"termination_timeout"`
+	TermSignalLabels     types.String `tfsdk:"term_signal_labels"`
+	Command              types.String `tfsdk:"command"`
+	SendAlerts           types.Bool   `tfsdk:"send_alerts"`
+	AutoUpdate           types.Bool   `tfsdk:"auto_update"`
+	Ports                types.String `tfsdk:"ports"`
+	Volumes              types.String `tfsdk:"volumes"`
+	Environment          types.String `tfsdk:"environment"`
+	Labels               types.String `tfsdk:"labels"`
+	ExtraArgs            types.List   `tfsdk:"extra_args"`
+	Started              types.Bool   `tfsdk:"started"`
+	Deployed             types.Bool   `tfsdk:"deployed"`
+	Tags                 types.List   `tfsdk:"tags"`
 }
 
 func NewDeploymentResource() resource.Resource {
@@ -78,6 +89,12 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 			},
+			"swarm_id": schema.StringAttribute{
+				Description: "Swarm to attach the deployment to (ID or name).",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
 			"image_type": schema.StringAttribute{
 				Description: `Image source type: "Image" for an external docker image, "Build" for a Komodo Build.`,
 				Optional:    true,
@@ -90,17 +107,65 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 			},
-			"network": schema.StringAttribute{
-				Description: "Docker network to connect to.",
+			"image_registry_account": schema.StringAttribute{
+				Description: "Docker registry account (username) used to authenticate image pulls when image_type = \"Image\".",
 				Optional:    true,
 				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
+			"skip_secret_interp": schema.BoolAttribute{
+				Description: "Skip Komodo variable / secret interpolation in environment.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"poll_for_updates": schema.BoolAttribute{
+				Description: "Poll the configured registry for newer image digests.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"links": schema.ListAttribute{
+				Description: "Quick links displayed in the Komodo UI for this deployment.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"network": schema.StringAttribute{
+				Description:   "Docker network to connect to.",
+				Optional:      true,
+				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"restart_mode": schema.StringAttribute{
-				Description: "Restart policy (e.g., unless-stopped, always, on-failure, no).",
+				Description:   "Restart policy (e.g., unless-stopped, always, on-failure, no).",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"replicas": schema.Int64Attribute{
+				Description: "Number of replicas for swarm-mode deployments. Ignored for plain Docker.",
 				Optional:    true,
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				Default:     int64default.StaticInt64(0),
+			},
+			"termination_signal": schema.StringAttribute{
+				Description: "Signal sent to the container on stop (e.g. SIGTERM, SIGINT). Defaults to Docker's default if empty.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
+			"termination_timeout": schema.Int64Attribute{
+				Description: "Seconds to wait for graceful shutdown before SIGKILL.",
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(0),
+			},
+			"term_signal_labels": schema.StringAttribute{
+				Description: "Newline-separated SIGNAL=label pairs for per-stage termination signals.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
 			},
 			"command": schema.StringAttribute{
 				Description: "Override the container command.",
@@ -184,7 +249,7 @@ func (r *DeploymentResource) Configure(_ context.Context, req resource.Configure
 	r.client = c
 }
 
-func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel, diags *resource.CreateResponse) (client.DeploymentConfig, error) {
+func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel) client.DeploymentConfig {
 	imgType := m.ImageType.ValueString()
 	if imgType == "" {
 		imgType = "Image"
@@ -196,38 +261,59 @@ func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel, 
 		imgParams.Image = m.Image.ValueString()
 	}
 	cfg := client.DeploymentConfig{
-		ServerID:    m.ServerID.ValueString(),
-		Image:       client.DeploymentImage{Type: imgType, Params: imgParams},
-		Network:     m.Network.ValueString(),
-		RestartMode: m.RestartMode.ValueString(),
-		Command:     m.Command.ValueString(),
-		Ports:       m.Ports.ValueString(),
-		Volumes:     m.Volumes.ValueString(),
-		Environment: m.Environment.ValueString(),
-		Labels:      m.Labels.ValueString(),
-		SendAlerts:  client.BoolPtr(m.SendAlerts.ValueBool()),
-		AutoUpdate:  client.BoolPtr(m.AutoUpdate.ValueBool()),
+		ServerID:             m.ServerID.ValueString(),
+		SwarmID:              m.SwarmID.ValueString(),
+		Image:                client.DeploymentImage{Type: imgType, Params: imgParams},
+		ImageRegistryAccount: m.ImageRegistryAccount.ValueString(),
+		SkipSecretInterp:     client.BoolPtr(m.SkipSecretInterp.ValueBool()),
+		PollForUpdates:       client.BoolPtr(m.PollForUpdates.ValueBool()),
+		Network:              m.Network.ValueString(),
+		RestartMode:          m.RestartMode.ValueString(),
+		TerminationSignal:    m.TerminationSignal.ValueString(),
+		TermSignalLabels:     m.TermSignalLabels.ValueString(),
+		Command:              m.Command.ValueString(),
+		Ports:                m.Ports.ValueString(),
+		Volumes:              m.Volumes.ValueString(),
+		Environment:          m.Environment.ValueString(),
+		Labels:               m.Labels.ValueString(),
+		SendAlerts:           client.BoolPtr(m.SendAlerts.ValueBool()),
+		AutoUpdate:           client.BoolPtr(m.AutoUpdate.ValueBool()),
+	}
+	if !m.Replicas.IsNull() && !m.Replicas.IsUnknown() {
+		cfg.Replicas = client.IntPtr(int(m.Replicas.ValueInt64()))
+	}
+	if !m.TerminationTimeout.IsNull() && !m.TerminationTimeout.IsUnknown() {
+		cfg.TerminationTimeout = client.IntPtr(int(m.TerminationTimeout.ValueInt64()))
 	}
 	if !m.ExtraArgs.IsNull() {
 		var args []string
 		m.ExtraArgs.ElementsAs(ctx, &args, false)
 		cfg.ExtraArgs = args
 	}
-	return cfg, nil
+	if !m.Links.IsNull() && !m.Links.IsUnknown() {
+		var v []string
+		m.Links.ElementsAs(ctx, &v, false)
+		cfg.Links = v
+	}
+	return cfg
 }
 
 func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deployment, m *DeploymentResourceModel) {
 	m.ID = types.StringValue(d.ID)
 	m.Name = types.StringValue(d.Name)
-	m.ServerID = types.StringValue(d.Config.ServerID)
+	m.ServerID = types.StringValue(preserveServerIDName(ctx, c, m.ServerID.ValueString(), d.Config.ServerID))
+	m.SwarmID = types.StringValue(d.Config.SwarmID)
 	m.ImageType = types.StringValue(d.Config.Image.Type)
 	if d.Config.Image.Type == "Build" {
 		m.Image = types.StringValue(d.Config.Image.Params.BuildID)
 	} else {
 		m.Image = types.StringValue(d.Config.Image.Params.Image)
 	}
+	m.ImageRegistryAccount = types.StringValue(d.Config.ImageRegistryAccount)
 	m.Network = types.StringValue(d.Config.Network)
 	m.RestartMode = types.StringValue(d.Config.RestartMode)
+	m.TerminationSignal = types.StringValue(d.Config.TerminationSignal)
+	m.TermSignalLabels = types.StringValue(d.Config.TermSignalLabels)
 	m.Command = types.StringValue(d.Config.Command)
 
 	if d.Config.SendAlerts != nil {
@@ -236,11 +322,27 @@ func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deplo
 	if d.Config.AutoUpdate != nil {
 		m.AutoUpdate = types.BoolValue(*d.Config.AutoUpdate)
 	}
+	if d.Config.SkipSecretInterp != nil {
+		m.SkipSecretInterp = types.BoolValue(*d.Config.SkipSecretInterp)
+	}
+	if d.Config.PollForUpdates != nil {
+		m.PollForUpdates = types.BoolValue(*d.Config.PollForUpdates)
+	}
+	if d.Config.Replicas != nil {
+		m.Replicas = types.Int64Value(int64(*d.Config.Replicas))
+	}
+	if d.Config.TerminationTimeout != nil {
+		m.TerminationTimeout = types.Int64Value(int64(*d.Config.TerminationTimeout))
+	}
 
-	m.Ports = types.StringValue(d.Config.Ports)
-	m.Volumes = types.StringValue(d.Config.Volumes)
-	m.Environment = types.StringValue(d.Config.Environment)
-	m.Labels = types.StringValue(d.Config.Labels)
+	// Komodo appends a trailing newline when storing these multi-line strings.
+	// Trim so plan/apply round-trips don't show fake drift.
+	m.Ports = types.StringValue(strings.TrimRight(d.Config.Ports, "\n"))
+	m.Volumes = types.StringValue(strings.TrimRight(d.Config.Volumes, "\n"))
+	m.Environment = types.StringValue(strings.TrimRight(d.Config.Environment, "\n"))
+	m.Labels = types.StringValue(strings.TrimRight(d.Config.Labels, "\n"))
+
+	m.Links = mapListToModel(d.Config.Links, m.Links)
 
 	if len(d.Config.ExtraArgs) > 0 {
 		list, _ := types.ListValueFrom(ctx, types.StringType, d.Config.ExtraArgs)
@@ -280,7 +382,8 @@ func (r *DeploymentResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	cfg, _ := deploymentConfigFromModel(ctx, &plan, resp)
+	cfg := deploymentConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
 
 	deployment, err := r.client.CreateDeployment(ctx, client.CreateDeploymentParams{
 		Name: plan.Name.ValueString(), Config: cfg,
@@ -350,35 +453,8 @@ func (r *DeploymentResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 	}
 
-	// Build config from plan (reuse create helper pattern).
-	imgType := plan.ImageType.ValueString()
-	if imgType == "" {
-		imgType = "Image"
-	}
-	var imgParams client.DeploymentImageParams
-	if imgType == "Build" {
-		imgParams.BuildID = plan.Image.ValueString()
-	} else {
-		imgParams.Image = plan.Image.ValueString()
-	}
-	cfg := client.DeploymentConfig{
-		ServerID:    plan.ServerID.ValueString(),
-		Image:       client.DeploymentImage{Type: imgType, Params: imgParams},
-		Network:     plan.Network.ValueString(),
-		RestartMode: plan.RestartMode.ValueString(),
-		Command:     plan.Command.ValueString(),
-		Ports:       plan.Ports.ValueString(),
-		Volumes:     plan.Volumes.ValueString(),
-		Environment: plan.Environment.ValueString(),
-		Labels:      plan.Labels.ValueString(),
-		SendAlerts:  client.BoolPtr(plan.SendAlerts.ValueBool()),
-		AutoUpdate:  client.BoolPtr(plan.AutoUpdate.ValueBool()),
-	}
-	if !plan.ExtraArgs.IsNull() {
-		var args []string
-		plan.ExtraArgs.ElementsAs(ctx, &args, false)
-		cfg.ExtraArgs = args
-	}
+	cfg := deploymentConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
 
 	deployment, err := r.client.UpdateDeployment(ctx, client.UpdateDeploymentParams{
 		ID: state.ID.ValueString(), Config: cfg,
@@ -434,38 +510,12 @@ func (r *DeploymentResource) ModifyPlan(ctx context.Context, req resource.Modify
 		return
 	}
 
-	changed := false
-
-	// Resolve server name → canonical ID.
-	// - If the resolved ID matches the prior state: replace plan with ID (no drift).
-	// - Otherwise (new resource or server change): mark Unknown so Terraform doesn't
-	//   constrain the post-apply value. Create/Update resolve before the API call.
-	if !plan.ServerID.IsUnknown() && !plan.ServerID.IsNull() {
-		configServerID := plan.ServerID.ValueString()
-		var priorServerID string
-		if !req.State.Raw.IsNull() {
-			var priorState DeploymentResourceModel
-			if diags := req.State.Get(ctx, &priorState); !diags.HasError() {
-				priorServerID = priorState.ServerID.ValueString()
-			}
-		}
-		if resolved := resolveServerID(ctx, r.client, configServerID); resolved != configServerID {
-			if resolved == priorServerID && priorServerID != "" {
-				plan.ServerID = types.StringValue(resolved)
-			} else {
-				plan.ServerID = types.StringUnknown()
-			}
-			changed = true
-		}
-	}
-
-	// Normalize empty extra_args list to null so it round-trips consistently with Read.
+	// server_id drift handled by Create/Update + preserveServerIDName.
+	// Normalize empty extra_args list to null so it round-trips with Read
+	// (Komodo treats null and [] identically on the wire, so we collapse
+	// them to a single canonical form here to avoid perpetual diff).
 	if !plan.ExtraArgs.IsNull() && !plan.ExtraArgs.IsUnknown() && len(plan.ExtraArgs.Elements()) == 0 {
 		plan.ExtraArgs = types.ListNull(types.StringType)
-		changed = true
-	}
-
-	if changed {
 		resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 	}
 }

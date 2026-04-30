@@ -2,8 +2,11 @@
 
 A Terraform provider for managing infrastructure on the [Komodo](https://komo.do) build and deployment system using the [Komodo Core API](https://docs.rs/komodo_client/latest/komodo_client/api/index.html).
 
+Targets **Komodo Core v2.1.x**. For users upgrading from earlier provider versions, see [Upgrading](#upgrading-from-1x).
+
 ## Table of Contents
 
+- [Upgrading from 1.x](#upgrading-from-1x)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Authentication](#authentication)
@@ -22,15 +25,56 @@ A Terraform provider for managing infrastructure on the [Komodo](https://komo.do
   - [komodo_api_key](#komodo_api_key)
   - [komodo_git_provider_account](#komodo_git_provider_account)
   - [komodo_docker_registry_account](#komodo_docker_registry_account)
+  - [komodo_onboarding_key](#komodo_onboarding_key)
 - [Data Sources](#data-sources)
 - [Examples](#examples)
 - [Development](#development)
+
+## Upgrading from 1.x
+
+Provider 2.0.0 targets Komodo Core v2.1.x. A few schema changes require config edits before `terraform apply`:
+
+- **Repo `on_clone` / `on_pull` are now flattened pairs.** Old:
+
+  ```hcl
+  on_clone = "git submodule update --init"
+  ```
+
+  New:
+
+  ```hcl
+  on_clone_path    = "./"
+  on_clone_command = "git submodule update --init"
+  ```
+
+  Komodo v2 expects a `{path, command}` object on the wire; the provider exposes the two fields as separate string attributes to keep configs readable.
+
+- **Stack `additional_env_files` is now a list of objects.** Old:
+
+  ```hcl
+  additional_env_files = [".env.shared", ".env.secret"]
+  ```
+
+  New:
+
+  ```hcl
+  additional_env_files = [
+    { path = ".env.shared" },                # track defaults to true
+    { path = ".env.secret", track = false }, # passed via --env-file only, contents not displayed
+  ]
+  ```
+
+- **`komodo_server.passkey` is deprecated.** Komodo v2 generates and rotates a Periphery keypair automatically. Existing configs continue to work, but `terraform plan` will warn. To migrate, drop `passkey` from your config and either let Komodo manage the key (default) or set the new `periphery_public_key` attribute to a key you control.
+
+- **New attributes** are additive (`links` on every resource, `swarm_id` on stack/deployment, `linked_repo` on stack/build, `builder_id` on repo, `pre_build_*` on build, `image_registry` on build, `auto_rotate_keys` on server, …). Default to leaving them unset for v1-style behavior.
+
+The new **`komodo_onboarding_key`** resource lets you mint reusable server-bootstrap keys for the v2 PKI flow.
 
 ## Requirements
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
 - [Go](https://golang.org/doc/install) >= 1.22 (to build the provider)
-- A running Komodo Core instance with API credentials
+- A running Komodo Core instance with API credentials (Komodo Core v2.1.x recommended)
 
 ## Installation
 
@@ -41,7 +85,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "johnciavarella/komodo"
-      version = "~> 0.1"
+      version = "~> 2.0"
     }
   }
 }
@@ -63,8 +107,8 @@ Download the appropriate binary for your platform from the releases page and pla
 
 ```bash
 # Example for macOS ARM64
-mkdir -p ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/0.1.0/darwin_arm64
-cp terraform-provider-komodo ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/0.1.0/darwin_arm64/
+mkdir -p ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/2.0.0/darwin_arm64
+cp terraform-provider-komodo ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/2.0.0/darwin_arm64/
 ```
 
 ## Authentication
@@ -78,7 +122,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "registry.terraform.io/johnciavarella/komodo"
-      version = "0.1.0"
+      version = "2.0.0"
     }
   }
 }
@@ -715,7 +759,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "registry.terraform.io/johnciavarella/komodo"
-      version = "0.1.0"
+      version = "2.0.0"
     }
   }
 }

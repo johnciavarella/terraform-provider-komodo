@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -27,19 +28,28 @@ type RepoResource struct {
 }
 
 type RepoResourceModel struct {
-	ID             types.String `tfsdk:"id"`
-	Name           types.String `tfsdk:"name"`
-	ServerID       types.String `tfsdk:"server_id"`
-	GitProvider    types.String `tfsdk:"git_provider"`
-	GitHTTPS       types.Bool   `tfsdk:"git_https"`
-	GitAccount     types.String `tfsdk:"git_account"`
-	Repo           types.String `tfsdk:"repo"`
-	Branch         types.String `tfsdk:"branch"`
-	Commit         types.String `tfsdk:"commit"`
-	OnClone        types.String `tfsdk:"on_clone"`
-	OnPull         types.String `tfsdk:"on_pull"`
-	WebhookEnabled types.Bool   `tfsdk:"webhook_enabled"`
-	Tags           types.List   `tfsdk:"tags"`
+	ID               types.String `tfsdk:"id"`
+	Name             types.String `tfsdk:"name"`
+	ServerID         types.String `tfsdk:"server_id"`
+	BuilderID        types.String `tfsdk:"builder_id"`
+	GitProvider      types.String `tfsdk:"git_provider"`
+	GitHTTPS         types.Bool   `tfsdk:"git_https"`
+	GitAccount       types.String `tfsdk:"git_account"`
+	Repo             types.String `tfsdk:"repo"`
+	Branch           types.String `tfsdk:"branch"`
+	Commit           types.String `tfsdk:"commit"`
+	Path             types.String `tfsdk:"path"`
+	OnClonePath      types.String `tfsdk:"on_clone_path"`
+	OnCloneCommand   types.String `tfsdk:"on_clone_command"`
+	OnPullPath       types.String `tfsdk:"on_pull_path"`
+	OnPullCommand    types.String `tfsdk:"on_pull_command"`
+	WebhookEnabled   types.Bool   `tfsdk:"webhook_enabled"`
+	WebhookSecret    types.String `tfsdk:"webhook_secret"`
+	Links            types.List   `tfsdk:"links"`
+	Environment      types.String `tfsdk:"environment"`
+	EnvFilePath      types.String `tfsdk:"env_file_path"`
+	SkipSecretInterp types.Bool   `tfsdk:"skip_secret_interp"`
+	Tags             types.List   `tfsdk:"tags"`
 }
 
 func NewRepoResource() resource.Resource {
@@ -58,18 +68,27 @@ func (r *RepoResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				Computed: true, Description: "Unique identifier.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
-			"name":            schema.StringAttribute{Required: true, Description: "Display name."},
-			"server_id":       schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Server to clone onto (ID or name)."},
-			"git_provider":    schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("github.com"), Description: "Git provider domain."},
-			"git_https":       schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Use HTTPS to clone."},
-			"git_account":     schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git account for private repos."},
-			"repo":            schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git repository (namespace/repo_name)."},
-			"branch":          schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Branch."},
-			"commit":          schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Specific commit hash."},
-			"on_clone":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run after cloning."},
-			"on_pull":         schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run after pulling."},
-			"webhook_enabled": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Enable webhooks."},
-			"tags":            schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this repo."},
+			"name":               schema.StringAttribute{Required: true, Description: "Display name."},
+			"server_id":          schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Server to clone onto (ID or name)."},
+			"builder_id":         schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Builder to clone onto (ID or name). Set this OR server_id, not both."},
+			"git_provider":       schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("github.com"), Description: "Git provider domain."},
+			"git_https":          schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Use HTTPS to clone."},
+			"git_account":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git account for private repos."},
+			"repo":               schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git repository (namespace/repo_name)."},
+			"branch":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("main"), Description: "Branch. Komodo defaults this to \"main\" if empty."},
+			"commit":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Specific commit hash."},
+			"path":               schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Path on the server where the repo is cloned. Defaults to the repo name."},
+			"on_clone_path":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Working directory for the on_clone command."},
+			"on_clone_command":   schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run after cloning."},
+			"on_pull_path":       schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Working directory for the on_pull command."},
+			"on_pull_command":    schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run after pulling."},
+			"webhook_enabled":    schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Enable webhooks."},
+			"webhook_secret":     schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Alternate webhook secret for this repo."},
+			"links":              schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "Quick links displayed in the Komodo UI."},
+			"environment":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Environment variables (KEY=VALUE, newline separated) for on_clone / on_pull commands."},
+			"env_file_path":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(".env"), Description: "Filename to write environment to. Komodo defaults this to .env if empty."},
+			"skip_secret_interp": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Skip Komodo variable / secret interpolation in environment."},
+			"tags":               schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this repo."},
 		},
 	}
 }
@@ -86,38 +105,83 @@ func (r *RepoResource) Configure(_ context.Context, req resource.ConfigureReques
 	r.client = c
 }
 
-func repoConfigFromModel(m *RepoResourceModel) client.RepoConfig {
-	return client.RepoConfig{
-		ServerID:       m.ServerID.ValueString(),
-		GitProvider:    m.GitProvider.ValueString(),
-		GitHTTPS:       client.BoolPtr(m.GitHTTPS.ValueBool()),
-		GitAccount:     m.GitAccount.ValueString(),
-		Repo:           m.Repo.ValueString(),
-		Branch:         m.Branch.ValueString(),
-		Commit:         m.Commit.ValueString(),
-		OnClone:        m.OnClone.ValueString(),
-		OnPull:         m.OnPull.ValueString(),
-		WebhookEnabled: client.BoolPtr(m.WebhookEnabled.ValueBool()),
+func repoConfigFromModel(ctx context.Context, m *RepoResourceModel) client.RepoConfig {
+	cfg := client.RepoConfig{
+		ServerID:         m.ServerID.ValueString(),
+		BuilderID:        m.BuilderID.ValueString(),
+		GitProvider:      m.GitProvider.ValueString(),
+		GitHTTPS:         client.BoolPtr(m.GitHTTPS.ValueBool()),
+		GitAccount:       m.GitAccount.ValueString(),
+		Repo:             m.Repo.ValueString(),
+		Branch:           m.Branch.ValueString(),
+		Commit:           m.Commit.ValueString(),
+		Path:             m.Path.ValueString(),
+		WebhookEnabled:   client.BoolPtr(m.WebhookEnabled.ValueBool()),
+		WebhookSecret:    m.WebhookSecret.ValueString(),
+		Environment:      m.Environment.ValueString(),
+		EnvFilePath:      m.EnvFilePath.ValueString(),
+		SkipSecretInterp: client.BoolPtr(m.SkipSecretInterp.ValueBool()),
 	}
+	if m.OnClonePath.ValueString() != "" || m.OnCloneCommand.ValueString() != "" {
+		cfg.OnClone = &client.SystemCommand{
+			Path:    m.OnClonePath.ValueString(),
+			Command: m.OnCloneCommand.ValueString(),
+		}
+	}
+	if m.OnPullPath.ValueString() != "" || m.OnPullCommand.ValueString() != "" {
+		cfg.OnPull = &client.SystemCommand{
+			Path:    m.OnPullPath.ValueString(),
+			Command: m.OnPullCommand.ValueString(),
+		}
+	}
+	if !m.Links.IsNull() && !m.Links.IsUnknown() {
+		var v []string
+		m.Links.ElementsAs(ctx, &v, false)
+		cfg.Links = v
+	}
+	return cfg
 }
 
 func mapRepoToModel(ctx context.Context, c *client.Client, r *client.Repo, m *RepoResourceModel) {
 	m.ID = types.StringValue(r.ID)
 	m.Name = types.StringValue(r.Name)
-	m.ServerID = types.StringValue(r.Config.ServerID)
+	m.ServerID = types.StringValue(preserveServerIDName(ctx, c, m.ServerID.ValueString(), r.Config.ServerID))
+	m.BuilderID = types.StringValue(r.Config.BuilderID)
 	m.GitProvider = types.StringValue(r.Config.GitProvider)
 	m.GitAccount = types.StringValue(r.Config.GitAccount)
 	m.Repo = types.StringValue(r.Config.Repo)
 	m.Branch = types.StringValue(r.Config.Branch)
 	m.Commit = types.StringValue(r.Config.Commit)
-	m.OnClone = types.StringValue(r.Config.OnClone)
-	m.OnPull = types.StringValue(r.Config.OnPull)
+	m.Path = types.StringValue(r.Config.Path)
+	m.WebhookSecret = types.StringValue(r.Config.WebhookSecret)
+	m.Environment = types.StringValue(strings.TrimRight(r.Config.Environment, "\n"))
+	m.EnvFilePath = types.StringValue(r.Config.EnvFilePath)
+
+	if r.Config.OnClone != nil {
+		m.OnClonePath = types.StringValue(strings.TrimRight(r.Config.OnClone.Path, "\n"))
+		m.OnCloneCommand = types.StringValue(strings.TrimRight(r.Config.OnClone.Command, "\n"))
+	} else {
+		m.OnClonePath = types.StringValue("")
+		m.OnCloneCommand = types.StringValue("")
+	}
+	if r.Config.OnPull != nil {
+		m.OnPullPath = types.StringValue(strings.TrimRight(r.Config.OnPull.Path, "\n"))
+		m.OnPullCommand = types.StringValue(strings.TrimRight(r.Config.OnPull.Command, "\n"))
+	} else {
+		m.OnPullPath = types.StringValue("")
+		m.OnPullCommand = types.StringValue("")
+	}
+
+	m.Links = mapListToModel(r.Config.Links, m.Links)
 
 	if r.Config.GitHTTPS != nil {
 		m.GitHTTPS = types.BoolValue(*r.Config.GitHTTPS)
 	}
 	if r.Config.WebhookEnabled != nil {
 		m.WebhookEnabled = types.BoolValue(*r.Config.WebhookEnabled)
+	}
+	if r.Config.SkipSecretInterp != nil {
+		m.SkipSecretInterp = types.BoolValue(*r.Config.SkipSecretInterp)
 	}
 
 	m.Tags = mapTagsToModel(ctx, c, r.Tags, m.Tags)
@@ -130,8 +194,11 @@ func (r *RepoResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
+	cfg := repoConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
+
 	repo, err := r.client.CreateRepo(ctx, client.CreateRepoParams{
-		Name: plan.Name.ValueString(), Config: repoConfigFromModel(&plan),
+		Name: plan.Name.ValueString(), Config: cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating repo", err.Error())
@@ -191,8 +258,11 @@ func (r *RepoResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		}
 	}
 
+	cfg := repoConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
+
 	repo, err := r.client.UpdateRepo(ctx, client.UpdateRepoParams{
-		ID: state.ID.ValueString(), Config: repoConfigFromModel(&plan),
+		ID: state.ID.ValueString(), Config: cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating repo", err.Error())
@@ -228,32 +298,8 @@ func (r *RepoResource) ImportState(ctx context.Context, req resource.ImportState
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *RepoResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || r.client == nil {
-		return
-	}
-	var plan RepoResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if plan.ServerID.IsUnknown() || plan.ServerID.IsNull() {
-		return
-	}
-	configServerID := plan.ServerID.ValueString()
-	var priorServerID string
-	if !req.State.Raw.IsNull() {
-		var priorState RepoResourceModel
-		if diags := req.State.Get(ctx, &priorState); !diags.HasError() {
-			priorServerID = priorState.ServerID.ValueString()
-		}
-	}
-	if resolved := resolveServerID(ctx, r.client, configServerID); resolved != configServerID {
-		if resolved == priorServerID && priorServerID != "" {
-			plan.ServerID = types.StringValue(resolved)
-		} else {
-			plan.ServerID = types.StringUnknown()
-		}
-		resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
-	}
+func (r *RepoResource) ModifyPlan(_ context.Context, _ resource.ModifyPlanRequest, _ *resource.ModifyPlanResponse) {
+	// server_id name→ID drift is handled by Create/Update calling
+	// resolveServerID for the API request and mapRepoToModel using
+	// preserveServerIDName so state keeps the user's literal.
 }
