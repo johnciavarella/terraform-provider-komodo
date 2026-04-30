@@ -26,8 +26,8 @@ resource "komodo_stack" "web" {
     { path = ".env.secret", track = false }, # passed via --env-file only
   ]
 
-  pre_deploy_path     = "./"
-  pre_deploy_command  = "./scripts/pre-deploy.sh"
+  pre_deploy_path    = "./"
+  pre_deploy_command = "./scripts/pre-deploy.sh"
 
   poll_for_updates = true
   tags             = ["production"]
