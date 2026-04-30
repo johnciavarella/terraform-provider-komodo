@@ -27,19 +27,42 @@ Manages a Komodo build (Docker image build configuration).
 - `build_path` (String) Build context path.
 - `builder_id` (String) Builder used to build the image (ID or name).
 - `commit` (String) Specific commit hash.
+- `dockerfile` (String) Inline Dockerfile contents (alternative to dockerfile_path).
 - `dockerfile_path` (String) Path to Dockerfile.
 - `files_on_host` (Boolean) Source files from host.
 - `git_account` (String) Git account for private repos.
 - `git_https` (Boolean) Use HTTPS to clone.
 - `git_provider` (String) Git provider domain.
 - `image_name` (String) Alternate image name for the registry.
+- `image_registry` (Attributes List) Registries to push the built image to. Each entry has domain, account, organization. (see [below for nested schema](#nestedatt--image_registry))
 - `image_tag` (String) Extra tag after the build version.
+- `include_commit_tag` (Boolean) Tag the build with the commit hash.
+- `include_latest_tag` (Boolean) Tag the build as :latest in addition to the version tag.
+- `include_version_tags` (Boolean) Push major / minor / patch tags as well as the full version.
 - `labels` (String) Image labels.
+- `linked_repo` (String) Komodo Repo resource (ID or name) to source build context from. Alternative to inline git_provider/repo settings.
+- `links` (List of String) Quick links displayed in the Komodo UI.
+- `pre_build_command` (String) Command to run before docker build.
+- `pre_build_path` (String) Working directory for the pre-build command.
 - `repo` (String) Git repository (namespace/repo_name).
+- `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in build_args.
 - `tags` (List of String) List of tag names to apply to this build.
 - `use_buildx` (Boolean) Use docker buildx.
 - `webhook_enabled` (Boolean) Enable webhooks.
+- `webhook_secret` (String, Sensitive) Alternate webhook secret for this build.
 
 ### Read-Only
 
 - `id` (String) Unique identifier.
+
+<a id="nestedatt--image_registry"></a>
+### Nested Schema for `image_registry`
+
+Required:
+
+- `domain` (String) Registry domain (e.g. docker.io, ghcr.io).
+
+Optional:
+
+- `account` (String) Registry account username.
+- `organization` (String) Optional organization to push under.

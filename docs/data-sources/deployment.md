@@ -22,8 +22,10 @@ Fetches a Komodo deployment by ID or name.
 ### Read-Only
 
 - `image` (String)
+- `image_registry_account` (String)
 - `image_type` (String)
 - `name` (String)
 - `network` (String)
 - `restart_mode` (String)
 - `server_id` (String)
+- `swarm_id` (String)

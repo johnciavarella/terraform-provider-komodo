@@ -25,5 +25,6 @@ Fetches a Komodo build by ID or name.
 - `builder_id` (String)
 - `git_provider` (String)
 - `image_name` (String)
+- `linked_repo` (String)
 - `name` (String)
 - `repo` (String)

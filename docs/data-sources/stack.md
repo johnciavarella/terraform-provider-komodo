@@ -23,7 +23,9 @@ Fetches a Komodo stack by ID or name.
 
 - `branch` (String)
 - `git_provider` (String)
+- `linked_repo` (String)
 - `name` (String)
 - `project_name` (String)
 - `repo` (String)
 - `server_id` (String)
+- `swarm_id` (String)

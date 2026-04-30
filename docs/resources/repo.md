@@ -22,16 +22,25 @@ Manages a Komodo repo (a git repository cloned on a server).
 ### Optional
 
 - `branch` (String) Branch.
+- `builder_id` (String) Builder to clone onto (ID or name). Set this OR server_id, not both.
 - `commit` (String) Specific commit hash.
+- `env_file_path` (String) Filename to write environment to.
+- `environment` (String) Environment variables (KEY=VALUE, newline separated) for on_clone / on_pull commands.
 - `git_account` (String) Git account for private repos.
 - `git_https` (Boolean) Use HTTPS to clone.
 - `git_provider` (String) Git provider domain.
-- `on_clone` (String) Command to run after cloning.
-- `on_pull` (String) Command to run after pulling.
+- `links` (List of String) Quick links displayed in the Komodo UI.
+- `on_clone_command` (String) Command to run after cloning.
+- `on_clone_path` (String) Working directory for the on_clone command.
+- `on_pull_command` (String) Command to run after pulling.
+- `on_pull_path` (String) Working directory for the on_pull command.
+- `path` (String) Path on the server where the repo is cloned. Defaults to the repo name.
 - `repo` (String) Git repository (namespace/repo_name).
 - `server_id` (String) Server to clone onto (ID or name).
+- `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in environment.
 - `tags` (List of String) List of tag names to apply to this repo.
 - `webhook_enabled` (Boolean) Enable webhooks.
+- `webhook_secret` (String, Sensitive) Alternate webhook secret for this repo.
 
 ### Read-Only
 

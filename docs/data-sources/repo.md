@@ -22,7 +22,9 @@ Fetches a Komodo repo by ID or name.
 ### Read-Only
 
 - `branch` (String)
+- `builder_id` (String)
 - `git_provider` (String)
 - `name` (String)
+- `path` (String)
 - `repo` (String)
 - `server_id` (String)

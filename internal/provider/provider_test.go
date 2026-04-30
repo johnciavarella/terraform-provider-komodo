@@ -29,6 +29,7 @@ func TestAccServerResource_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("komodo_server.test", "name", rName),
 					resource.TestCheckResourceAttr("komodo_server.test", "address", "http://localhost:8120"),
 					resource.TestCheckResourceAttr("komodo_server.test", "enabled", "true"),
+					resource.TestCheckResourceAttr("komodo_server.test", "links.0", "https://example.com"),
 				),
 			},
 			// Import.
@@ -56,6 +57,7 @@ resource "komodo_server" "test" {
   name    = %[1]q
   address = %[2]q
   enabled = true
+  links   = ["https://example.com"]
 }
 `, name, address)
 }
@@ -194,6 +196,8 @@ func TestAccRepoResource_basic(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("komodo_repo.test", "id"),
 					resource.TestCheckResourceAttr("komodo_repo.test", "name", rName),
+					resource.TestCheckResourceAttr("komodo_repo.test", "on_clone_path", "./"),
+					resource.TestCheckResourceAttr("komodo_repo.test", "on_clone_command", "echo cloned"),
 				),
 			},
 			{
@@ -208,9 +212,11 @@ func TestAccRepoResource_basic(t *testing.T) {
 func testAccRepoResourceConfig(name string) string {
 	return fmt.Sprintf(`
 resource "komodo_repo" "test" {
-  name   = %[1]q
-  repo   = "myorg/test-repo"
-  branch = "main"
+  name             = %[1]q
+  repo             = "myorg/test-repo"
+  branch           = "main"
+  on_clone_path    = "./"
+  on_clone_command = "echo cloned"
 }
 `, name)
 }

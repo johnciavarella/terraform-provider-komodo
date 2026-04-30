@@ -34,6 +34,11 @@ type ServerResourceModel struct {
 	Region                types.String  `tfsdk:"region"`
 	Enabled               types.Bool    `tfsdk:"enabled"`
 	Passkey               types.String  `tfsdk:"passkey"`
+	InsecureTLS           types.Bool    `tfsdk:"insecure_tls"`
+	AutoRotateKeys        types.Bool    `tfsdk:"auto_rotate_keys"`
+	PeripheryPublicKey    types.String  `tfsdk:"periphery_public_key"`
+	IgnoreMounts          types.List    `tfsdk:"ignore_mounts"`
+	Links                 types.List    `tfsdk:"links"`
 	StatsMonitoring       types.Bool    `tfsdk:"stats_monitoring"`
 	AutoPrune             types.Bool    `tfsdk:"auto_prune"`
 	SendUnreachableAlerts types.Bool    `tfsdk:"send_unreachable_alerts"`
@@ -97,11 +102,44 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Default:     booldefault.StaticBool(true),
 			},
 			"passkey": schema.StringAttribute{
-				Description: "Passkey for authenticating with Periphery.",
+				Description:        "Deprecated: replaced by Komodo's automatic PKI key rotation in v2. Retained for backwards compatibility only; use periphery_public_key instead.",
+				DeprecationMessage: "Replaced by Komodo's automatic PKI key rotation in v2. Use periphery_public_key on this resource and let Komodo manage the keypair.",
+				Optional:           true,
+				Computed:           true,
+				Sensitive:          true,
+				Default:            stringdefault.StaticString(""),
+			},
+			"insecure_tls": schema.BoolAttribute{
+				Description: "Skip TLS certificate validation when Core connects to Periphery. Defaults to true because Periphery typically presents a self-signed cert.",
 				Optional:    true,
 				Computed:    true,
-				Sensitive:   true,
-				Default:     stringdefault.StaticString(""),
+				Default:     booldefault.StaticBool(true),
+			},
+			"auto_rotate_keys": schema.BoolAttribute{
+				Description: "Whether Komodo should automatically rotate the Periphery keypair as part of RotateAllServerKeys.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
+			},
+			"periphery_public_key": schema.StringAttribute{
+				Description: "SPKI base64 public key for the Periphery agent. If set, Komodo accepts only that key. If unset, Komodo records the key Periphery presents on first contact.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"ignore_mounts": schema.ListAttribute{
+				Description: "Mount paths excluded from disk-stats reporting.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"links": schema.ListAttribute{
+				Description: "Quick links displayed in the Komodo UI for this server.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
 			},
 			"stats_monitoring": schema.BoolAttribute{
 				Description: "Whether to monitor server stats beyond health check.",
@@ -200,6 +238,41 @@ func (r *ServerResource) Configure(_ context.Context, req resource.ConfigureRequ
 	r.client = c
 }
 
+func serverConfigFromModel(ctx context.Context, m *ServerResourceModel) client.ServerConfig {
+	cfg := client.ServerConfig{
+		Address:               m.Address.ValueString(),
+		ExternalAddress:       m.ExternalAddress.ValueString(),
+		Region:                m.Region.ValueString(),
+		Enabled:               client.BoolPtr(m.Enabled.ValueBool()),
+		Passkey:               m.Passkey.ValueString(),
+		InsecureTLS:           client.BoolPtr(m.InsecureTLS.ValueBool()),
+		AutoRotateKeys:        client.BoolPtr(m.AutoRotateKeys.ValueBool()),
+		StatsMonitoring:       client.BoolPtr(m.StatsMonitoring.ValueBool()),
+		AutoPrune:             client.BoolPtr(m.AutoPrune.ValueBool()),
+		SendUnreachableAlerts: client.BoolPtr(m.SendUnreachableAlerts.ValueBool()),
+		SendCPUAlerts:         client.BoolPtr(m.SendCPUAlerts.ValueBool()),
+		SendMemAlerts:         client.BoolPtr(m.SendMemAlerts.ValueBool()),
+		SendDiskAlerts:        client.BoolPtr(m.SendDiskAlerts.ValueBool()),
+		CPUWarning:            client.Float64Ptr(m.CPUWarning.ValueFloat64()),
+		CPUCritical:           client.Float64Ptr(m.CPUCritical.ValueFloat64()),
+		MemWarning:            client.Float64Ptr(m.MemWarning.ValueFloat64()),
+		MemCritical:           client.Float64Ptr(m.MemCritical.ValueFloat64()),
+		DiskWarning:           client.Float64Ptr(m.DiskWarning.ValueFloat64()),
+		DiskCritical:          client.Float64Ptr(m.DiskCritical.ValueFloat64()),
+	}
+	if !m.IgnoreMounts.IsNull() && !m.IgnoreMounts.IsUnknown() {
+		var v []string
+		m.IgnoreMounts.ElementsAs(ctx, &v, false)
+		cfg.IgnoreMounts = v
+	}
+	if !m.Links.IsNull() && !m.Links.IsUnknown() {
+		var v []string
+		m.Links.ElementsAs(ctx, &v, false)
+		cfg.Links = v
+	}
+	return cfg
+}
+
 func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan ServerResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -207,33 +280,23 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	params := client.CreateServerParams{
-		Name: plan.Name.ValueString(),
-		Config: client.ServerConfig{
-			Address:               plan.Address.ValueString(),
-			ExternalAddress:       plan.ExternalAddress.ValueString(),
-			Region:                plan.Region.ValueString(),
-			Enabled:               client.BoolPtr(plan.Enabled.ValueBool()),
-			Passkey:               plan.Passkey.ValueString(),
-			StatsMonitoring:       client.BoolPtr(plan.StatsMonitoring.ValueBool()),
-			AutoPrune:             client.BoolPtr(plan.AutoPrune.ValueBool()),
-			SendUnreachableAlerts: client.BoolPtr(plan.SendUnreachableAlerts.ValueBool()),
-			SendCPUAlerts:         client.BoolPtr(plan.SendCPUAlerts.ValueBool()),
-			SendMemAlerts:         client.BoolPtr(plan.SendMemAlerts.ValueBool()),
-			SendDiskAlerts:        client.BoolPtr(plan.SendDiskAlerts.ValueBool()),
-			CPUWarning:            client.Float64Ptr(plan.CPUWarning.ValueFloat64()),
-			CPUCritical:           client.Float64Ptr(plan.CPUCritical.ValueFloat64()),
-			MemWarning:            client.Float64Ptr(plan.MemWarning.ValueFloat64()),
-			MemCritical:           client.Float64Ptr(plan.MemCritical.ValueFloat64()),
-			DiskWarning:           client.Float64Ptr(plan.DiskWarning.ValueFloat64()),
-			DiskCritical:          client.Float64Ptr(plan.DiskCritical.ValueFloat64()),
-		},
-	}
-
-	server, err := r.client.CreateServer(ctx, params)
+	server, err := r.client.CreateServer(ctx, client.CreateServerParams{
+		Name:   plan.Name.ValueString(),
+		Config: serverConfigFromModel(ctx, &plan),
+	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating server", err.Error())
 		return
+	}
+
+	if !plan.PeripheryPublicKey.IsNull() && !plan.PeripheryPublicKey.IsUnknown() && plan.PeripheryPublicKey.ValueString() != "" {
+		if err := r.client.UpdateServerPublicKey(ctx, server.ID, plan.PeripheryPublicKey.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Error setting server public key", err.Error())
+			return
+		}
+		if refreshed, err := r.client.GetServer(ctx, server.ID); err == nil {
+			server = refreshed
+		}
 	}
 
 	tagsFromPlan := plan.Tags
@@ -280,29 +343,6 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	params := client.UpdateServerParams{
-		ID: state.ID.ValueString(),
-		Config: client.ServerConfig{
-			Address:               plan.Address.ValueString(),
-			ExternalAddress:       plan.ExternalAddress.ValueString(),
-			Region:                plan.Region.ValueString(),
-			Enabled:               client.BoolPtr(plan.Enabled.ValueBool()),
-			Passkey:               plan.Passkey.ValueString(),
-			StatsMonitoring:       client.BoolPtr(plan.StatsMonitoring.ValueBool()),
-			AutoPrune:             client.BoolPtr(plan.AutoPrune.ValueBool()),
-			SendUnreachableAlerts: client.BoolPtr(plan.SendUnreachableAlerts.ValueBool()),
-			SendCPUAlerts:         client.BoolPtr(plan.SendCPUAlerts.ValueBool()),
-			SendMemAlerts:         client.BoolPtr(plan.SendMemAlerts.ValueBool()),
-			SendDiskAlerts:        client.BoolPtr(plan.SendDiskAlerts.ValueBool()),
-			CPUWarning:            client.Float64Ptr(plan.CPUWarning.ValueFloat64()),
-			CPUCritical:           client.Float64Ptr(plan.CPUCritical.ValueFloat64()),
-			MemWarning:            client.Float64Ptr(plan.MemWarning.ValueFloat64()),
-			MemCritical:           client.Float64Ptr(plan.MemCritical.ValueFloat64()),
-			DiskWarning:           client.Float64Ptr(plan.DiskWarning.ValueFloat64()),
-			DiskCritical:          client.Float64Ptr(plan.DiskCritical.ValueFloat64()),
-		},
-	}
-
 	// Handle rename if name changed.
 	if plan.Name.ValueString() != state.Name.ValueString() {
 		err := r.client.Write(ctx, "RenameServer", map[string]string{
@@ -315,10 +355,24 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	server, err := r.client.UpdateServer(ctx, params)
+	server, err := r.client.UpdateServer(ctx, client.UpdateServerParams{
+		ID:     state.ID.ValueString(),
+		Config: serverConfigFromModel(ctx, &plan),
+	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating server", err.Error())
 		return
+	}
+
+	plannedKey := plan.PeripheryPublicKey.ValueString()
+	if !plan.PeripheryPublicKey.IsNull() && !plan.PeripheryPublicKey.IsUnknown() && plannedKey != "" && plannedKey != state.PeripheryPublicKey.ValueString() {
+		if err := r.client.UpdateServerPublicKey(ctx, state.ID.ValueString(), plannedKey); err != nil {
+			resp.Diagnostics.AddError("Error setting server public key", err.Error())
+			return
+		}
+		if refreshed, err := r.client.GetServer(ctx, state.ID.ValueString()); err == nil {
+			server = refreshed
+		}
 	}
 
 	tagsFromPlan := plan.Tags
@@ -358,9 +412,19 @@ func mapServerToModel(ctx context.Context, c *client.Client, s *client.Server, m
 	m.ExternalAddress = types.StringValue(s.Config.ExternalAddress)
 	m.Region = types.StringValue(s.Config.Region)
 	m.Passkey = types.StringValue(s.Config.Passkey)
+	m.PeripheryPublicKey = types.StringValue(s.PeripheryPublicKey)
+
+	m.IgnoreMounts = mapListToModel(s.Config.IgnoreMounts, m.IgnoreMounts)
+	m.Links = mapListToModel(s.Config.Links, m.Links)
 
 	if s.Config.Enabled != nil {
 		m.Enabled = types.BoolValue(*s.Config.Enabled)
+	}
+	if s.Config.InsecureTLS != nil {
+		m.InsecureTLS = types.BoolValue(*s.Config.InsecureTLS)
+	}
+	if s.Config.AutoRotateKeys != nil {
+		m.AutoRotateKeys = types.BoolValue(*s.Config.AutoRotateKeys)
 	}
 	if s.Config.StatsMonitoring != nil {
 		m.StatsMonitoring = types.BoolValue(*s.Config.StatsMonitoring)

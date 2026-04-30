@@ -21,12 +21,16 @@ Manages a Komodo stack (Docker Compose stack).
 
 ### Optional
 
-- `additional_env_files` (List of String) Additional env files to attach with --env-file.
+- `additional_env_files` (Attributes List) Additional env files to attach with --env-file. Each entry is an object with `path` (relative to run_directory) and `track` (whether Komodo reads/diffs the file's contents). (see [below for nested schema](#nestedatt--additional_env_files))
 - `auto_pull` (Boolean) Whether to automatically compose pull before redeploying.
 - `auto_update` (Boolean) Whether to automatically redeploy when newer images are found.
+- `auto_update_all_services` (Boolean) Whether auto-update redeploys every service (true) or only services with updated images (false).
 - `branch` (String) Branch of the repo.
 - `build_extra_args` (List of String) Extra arguments passed after docker compose build.
+- `clone_path` (String) Custom path on the server / builder to clone the repo into.
 - `commit` (String) Specific commit hash.
+- `compose_cmd_wrapper` (String) Optional command wrapper invoked before docker compose (e.g. "docker buildx bake" or a custom script).
+- `compose_cmd_wrapper_include` (List of String) Compose subcommands to wrap with compose_cmd_wrapper (e.g. ["up", "build"]).
 - `deployed` (Boolean) When true, triggers a full DeployStack (git pull + compose up) after create/update. Use this to redeploy on config changes. Like started, this is intent-based and async.
 - `destroy_before_deploy` (Boolean) Whether to run docker compose down before compose up.
 - `env_file_path` (String) Name of the environment file written before docker compose up.
@@ -39,11 +43,15 @@ Manages a Komodo stack (Docker Compose stack).
 - `git_https` (Boolean) Whether to use HTTPS to clone the repo.
 - `git_provider` (String) Git provider domain (e.g., github.com).
 - `ignore_services` (List of String) Services to exclude from stack health status checks.
+- `linked_repo` (String) Komodo Repo resource (ID or name) to source compose files from. Alternative to inline git_provider/repo settings.
+- `links` (List of String) Quick links displayed in the Komodo UI for this stack.
+- `poll_for_updates` (Boolean) Poll connected docker registries for newer images.
 - `post_deploy_command` (String) Command to run after the stack is deployed.
 - `post_deploy_path` (String) Working directory for the post-deploy command.
 - `pre_deploy_command` (String) Command to run before the stack is deployed.
 - `pre_deploy_path` (String) Working directory for the pre-deploy command.
 - `project_name` (String) Custom project name for docker compose -p. Defaults to the stack name.
+- `reclone` (Boolean) Delete the existing clone and re-clone from scratch on every deploy.
 - `registry_account` (String) Username of the docker registry account to authenticate with. Must match a komodo_docker_registry_account username for the given registry_provider.
 - `registry_provider` (String) Docker registry domain used for image pulls (e.g. 'ghcr.io', 'registry.hub.docker.com'). Must match the domain of the registry account.
 - `repo` (String) Git repository in namespace/repo_name format.
@@ -51,7 +59,9 @@ Manages a Komodo stack (Docker Compose stack).
 - `run_directory` (String) Directory to cd into before running docker compose.
 - `send_alerts` (Boolean) Whether to send StackStateChange alerts.
 - `server_id` (String) The server to deploy the stack on (ID or name).
+- `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in compose files and environment.
 - `started` (Boolean) Whether the stack should be running. When true, runs DeployStack (compose up) to create and start containers. When false, runs DestroyStack (compose down) to stop and remove them. Intent-based and async.
+- `swarm_id` (String) Swarm to attach the stack to (ID or name). Mutually exclusive with server_id for swarm-mode deployments.
 - `tags` (List of String) List of tag names to apply to this stack.
 - `webhook_enabled` (Boolean) Whether incoming webhooks trigger action.
 - `webhook_force_deploy` (Boolean) Always execute deployment without comparing changes when webhook fires.
@@ -60,3 +70,14 @@ Manages a Komodo stack (Docker Compose stack).
 ### Read-Only
 
 - `id` (String) Unique identifier of the stack.
+
+<a id="nestedatt--additional_env_files"></a>
+### Nested Schema for `additional_env_files`
+
+Required:
+
+- `path` (String) Path of the env file relative to run_directory.
+
+Optional:
+
+- `track` (Boolean) Whether Komodo reads/displays/validates the file. If false, the file is only passed via --env-file.

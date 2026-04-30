@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -50,43 +51,63 @@ type StackResource struct {
 }
 
 type StackResourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	Name                types.String `tfsdk:"name"`
-	ServerID            types.String `tfsdk:"server_id"`
-	ProjectName         types.String `tfsdk:"project_name"`
-	AutoPull            types.Bool   `tfsdk:"auto_pull"`
-	RunBuild            types.Bool   `tfsdk:"run_build"`
-	AutoUpdate          types.Bool   `tfsdk:"auto_update"`
-	DestroyBeforeDeploy types.Bool   `tfsdk:"destroy_before_deploy"`
-	GitProvider         types.String `tfsdk:"git_provider"`
-	GitHTTPS            types.Bool   `tfsdk:"git_https"`
-	GitAccount          types.String `tfsdk:"git_account"`
-	RegistryProvider    types.String `tfsdk:"registry_provider"`
-	RegistryAccount     types.String `tfsdk:"registry_account"`
-	Repo                types.String `tfsdk:"repo"`
-	Branch              types.String `tfsdk:"branch"`
-	Commit              types.String `tfsdk:"commit"`
-	FilePaths           types.List   `tfsdk:"file_paths"`
-	FilesOnHost         types.Bool   `tfsdk:"files_on_host"`
-	FileContents        types.String `tfsdk:"file_contents"`
-	Environment         types.String `tfsdk:"environment"`
-	RunDirectory        types.String `tfsdk:"run_directory"`
-	EnvFilePath         types.String `tfsdk:"env_file_path"`
-	AdditionalEnvFiles  types.List   `tfsdk:"additional_env_files"`
-	WebhookEnabled      types.Bool   `tfsdk:"webhook_enabled"`
-	WebhookSecret       types.String `tfsdk:"webhook_secret"`
-	WebhookForceDeploy  types.Bool   `tfsdk:"webhook_force_deploy"`
-	PreDeployPath       types.String `tfsdk:"pre_deploy_path"`
-	PreDeployCommand    types.String `tfsdk:"pre_deploy_command"`
-	PostDeployPath      types.String `tfsdk:"post_deploy_path"`
-	PostDeployCommand   types.String `tfsdk:"post_deploy_command"`
-	ExtraArgs           types.List   `tfsdk:"extra_args"`
-	BuildExtraArgs      types.List   `tfsdk:"build_extra_args"`
-	IgnoreServices      types.List   `tfsdk:"ignore_services"`
-	SendAlerts          types.Bool   `tfsdk:"send_alerts"`
-	Started             types.Bool   `tfsdk:"started"`
-	Deployed            types.Bool   `tfsdk:"deployed"`
-	Tags                types.List   `tfsdk:"tags"`
+	ID                       types.String `tfsdk:"id"`
+	Name                     types.String `tfsdk:"name"`
+	ServerID                 types.String `tfsdk:"server_id"`
+	SwarmID                  types.String `tfsdk:"swarm_id"`
+	Links                    types.List   `tfsdk:"links"`
+	ProjectName              types.String `tfsdk:"project_name"`
+	AutoPull                 types.Bool   `tfsdk:"auto_pull"`
+	RunBuild                 types.Bool   `tfsdk:"run_build"`
+	PollForUpdates           types.Bool   `tfsdk:"poll_for_updates"`
+	AutoUpdate               types.Bool   `tfsdk:"auto_update"`
+	AutoUpdateAllServices    types.Bool   `tfsdk:"auto_update_all_services"`
+	DestroyBeforeDeploy      types.Bool   `tfsdk:"destroy_before_deploy"`
+	SkipSecretInterp         types.Bool   `tfsdk:"skip_secret_interp"`
+	LinkedRepo               types.String `tfsdk:"linked_repo"`
+	GitProvider              types.String `tfsdk:"git_provider"`
+	GitHTTPS                 types.Bool   `tfsdk:"git_https"`
+	GitAccount               types.String `tfsdk:"git_account"`
+	RegistryProvider         types.String `tfsdk:"registry_provider"`
+	RegistryAccount          types.String `tfsdk:"registry_account"`
+	Repo                     types.String `tfsdk:"repo"`
+	Branch                   types.String `tfsdk:"branch"`
+	Commit                   types.String `tfsdk:"commit"`
+	ClonePath                types.String `tfsdk:"clone_path"`
+	Reclone                  types.Bool   `tfsdk:"reclone"`
+	FilePaths                types.List   `tfsdk:"file_paths"`
+	FilesOnHost              types.Bool   `tfsdk:"files_on_host"`
+	FileContents             types.String `tfsdk:"file_contents"`
+	Environment              types.String `tfsdk:"environment"`
+	RunDirectory             types.String `tfsdk:"run_directory"`
+	EnvFilePath              types.String `tfsdk:"env_file_path"`
+	AdditionalEnvFiles       types.List   `tfsdk:"additional_env_files"`
+	WebhookEnabled           types.Bool   `tfsdk:"webhook_enabled"`
+	WebhookSecret            types.String `tfsdk:"webhook_secret"`
+	WebhookForceDeploy       types.Bool   `tfsdk:"webhook_force_deploy"`
+	PreDeployPath            types.String `tfsdk:"pre_deploy_path"`
+	PreDeployCommand         types.String `tfsdk:"pre_deploy_command"`
+	PostDeployPath           types.String `tfsdk:"post_deploy_path"`
+	PostDeployCommand        types.String `tfsdk:"post_deploy_command"`
+	ExtraArgs                types.List   `tfsdk:"extra_args"`
+	BuildExtraArgs           types.List   `tfsdk:"build_extra_args"`
+	ComposeCmdWrapper        types.String `tfsdk:"compose_cmd_wrapper"`
+	ComposeCmdWrapperInclude types.List   `tfsdk:"compose_cmd_wrapper_include"`
+	IgnoreServices           types.List   `tfsdk:"ignore_services"`
+	SendAlerts               types.Bool   `tfsdk:"send_alerts"`
+	Started                  types.Bool   `tfsdk:"started"`
+	Deployed                 types.Bool   `tfsdk:"deployed"`
+	Tags                     types.List   `tfsdk:"tags"`
+}
+
+// additionalEnvFileObjectType is the Terraform object type for entries in
+// `additional_env_files`. v2 expanded these from plain strings to {path, track}
+// objects.
+var additionalEnvFileObjectType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"path":  types.StringType,
+		"track": types.BoolType,
+	},
 }
 
 func NewStackResource() resource.Resource {
@@ -118,6 +139,18 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     stringdefault.StaticString("Local"),
 			},
+			"swarm_id": schema.StringAttribute{
+				Description: "Swarm to attach the stack to (ID or name). Mutually exclusive with server_id for swarm-mode deployments.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
+			"links": schema.ListAttribute{
+				Description: "Quick links displayed in the Komodo UI for this stack.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+			},
 			"project_name": schema.StringAttribute{
 				Description: "Custom project name for docker compose -p. Defaults to the stack name.",
 				Optional:    true,
@@ -136,8 +169,20 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"poll_for_updates": schema.BoolAttribute{
+				Description: "Poll connected docker registries for newer images.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
 			"auto_update": schema.BoolAttribute{
 				Description: "Whether to automatically redeploy when newer images are found.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"auto_update_all_services": schema.BoolAttribute{
+				Description: "Whether auto-update redeploys every service (true) or only services with updated images (false).",
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
@@ -147,6 +192,18 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
+			},
+			"skip_secret_interp": schema.BoolAttribute{
+				Description: "Skip Komodo variable / secret interpolation in compose files and environment.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"linked_repo": schema.StringAttribute{
+				Description: "Komodo Repo resource (ID or name) to source compose files from. Alternative to inline git_provider/repo settings.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
 			},
 			"git_provider": schema.StringAttribute{
 				Description: "Git provider domain (e.g., github.com).",
@@ -196,6 +253,18 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 			},
+			"clone_path": schema.StringAttribute{
+				Description: "Custom path on the server / builder to clone the repo into.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
+			"reclone": schema.BoolAttribute{
+				Description: "Delete the existing clone and re-clone from scratch on every deploy.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
 			"file_paths": schema.ListAttribute{
 				Description: "Paths to docker-compose.yml files.",
 				Optional:    true,
@@ -235,11 +304,16 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     stringdefault.StaticString(".env"),
 			},
-			"additional_env_files": schema.ListAttribute{
-				Description: "Additional env files to attach with --env-file.",
+			"additional_env_files": schema.ListNestedAttribute{
+				Description: "Additional env files to attach with --env-file. Each entry is an object with `path` (relative to run_directory) and `track` (whether Komodo reads/diffs the file's contents).",
 				Optional:    true,
 				Computed:    true,
-				ElementType: types.StringType,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"path":  schema.StringAttribute{Required: true, Description: "Path of the env file relative to run_directory."},
+						"track": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Whether Komodo reads/displays/validates the file. If false, the file is only passed via --env-file."},
+					},
+				},
 				PlanModifiers: []planmodifier.List{
 					useStateForUnknownIncludingNull{},
 				},
@@ -305,6 +379,18 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					useStateForUnknownIncludingNull{},
 				},
 			},
+			"compose_cmd_wrapper": schema.StringAttribute{
+				Description: "Optional command wrapper invoked before docker compose (e.g. \"docker buildx bake\" or a custom script).",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
+			"compose_cmd_wrapper_include": schema.ListAttribute{
+				Description: "Compose subcommands to wrap with compose_cmd_wrapper (e.g. [\"up\", \"build\"]).",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+			},
 			"ignore_services": schema.ListAttribute{
 				Description: "Services to exclude from stack health status checks.",
 				Optional:    true,
@@ -364,29 +450,43 @@ func stackConfigFromModel(ctx context.Context, m *StackResourceModel) client.Sta
 	}
 
 	cfg := client.StackConfig{
-		ServerID:            serverID,
-		ProjectName:         m.ProjectName.ValueString(),
-		AutoPull:            client.BoolPtr(m.AutoPull.ValueBool()),
-		RunBuild:            client.BoolPtr(m.RunBuild.ValueBool()),
-		AutoUpdate:          client.BoolPtr(m.AutoUpdate.ValueBool()),
-		DestroyBeforeDeploy: client.BoolPtr(m.DestroyBeforeDeploy.ValueBool()),
-		GitProvider:         m.GitProvider.ValueString(),
-		GitHTTPS:            client.BoolPtr(m.GitHTTPS.ValueBool()),
-		GitAccount:          m.GitAccount.ValueString(),
-		RegistryProvider:    m.RegistryProvider.ValueString(),
-		RegistryAccount:     m.RegistryAccount.ValueString(),
-		Repo:                m.Repo.ValueString(),
-		Branch:              m.Branch.ValueString(),
-		Commit:              m.Commit.ValueString(),
-		FilesOnHost:         client.BoolPtr(m.FilesOnHost.ValueBool()),
-		FileContents:        m.FileContents.ValueString(),
-		Environment:         m.Environment.ValueString(),
-		RunDirectory:        m.RunDirectory.ValueString(),
-		EnvFilePath:         m.EnvFilePath.ValueString(),
-		WebhookEnabled:      client.BoolPtr(m.WebhookEnabled.ValueBool()),
-		WebhookSecret:       m.WebhookSecret.ValueString(),
-		WebhookForceDeploy:  client.BoolPtr(m.WebhookForceDeploy.ValueBool()),
-		SendAlerts:          client.BoolPtr(m.SendAlerts.ValueBool()),
+		ServerID:              serverID,
+		SwarmID:               m.SwarmID.ValueString(),
+		ProjectName:           m.ProjectName.ValueString(),
+		AutoPull:              client.BoolPtr(m.AutoPull.ValueBool()),
+		RunBuild:              client.BoolPtr(m.RunBuild.ValueBool()),
+		PollForUpdates:        client.BoolPtr(m.PollForUpdates.ValueBool()),
+		AutoUpdate:            client.BoolPtr(m.AutoUpdate.ValueBool()),
+		AutoUpdateAllServices: client.BoolPtr(m.AutoUpdateAllServices.ValueBool()),
+		DestroyBeforeDeploy:   client.BoolPtr(m.DestroyBeforeDeploy.ValueBool()),
+		SkipSecretInterp:      client.BoolPtr(m.SkipSecretInterp.ValueBool()),
+		LinkedRepo:            m.LinkedRepo.ValueString(),
+		GitProvider:           m.GitProvider.ValueString(),
+		GitHTTPS:              client.BoolPtr(m.GitHTTPS.ValueBool()),
+		GitAccount:            m.GitAccount.ValueString(),
+		RegistryProvider:      m.RegistryProvider.ValueString(),
+		RegistryAccount:       m.RegistryAccount.ValueString(),
+		Repo:                  m.Repo.ValueString(),
+		Branch:                m.Branch.ValueString(),
+		Commit:                m.Commit.ValueString(),
+		ClonePath:             m.ClonePath.ValueString(),
+		Reclone:               client.BoolPtr(m.Reclone.ValueBool()),
+		FilesOnHost:           client.BoolPtr(m.FilesOnHost.ValueBool()),
+		FileContents:          m.FileContents.ValueString(),
+		Environment:           m.Environment.ValueString(),
+		RunDirectory:          m.RunDirectory.ValueString(),
+		EnvFilePath:           m.EnvFilePath.ValueString(),
+		WebhookEnabled:        client.BoolPtr(m.WebhookEnabled.ValueBool()),
+		WebhookSecret:         m.WebhookSecret.ValueString(),
+		WebhookForceDeploy:    client.BoolPtr(m.WebhookForceDeploy.ValueBool()),
+		ComposeCmdWrapper:     m.ComposeCmdWrapper.ValueString(),
+		SendAlerts:            client.BoolPtr(m.SendAlerts.ValueBool()),
+	}
+
+	if !m.Links.IsNull() && !m.Links.IsUnknown() {
+		var v []string
+		m.Links.ElementsAs(ctx, &v, false)
+		cfg.Links = v
 	}
 
 	if !m.FilePaths.IsNull() {
@@ -395,10 +495,20 @@ func stackConfigFromModel(ctx context.Context, m *StackResourceModel) client.Sta
 		cfg.FilePaths = paths
 	}
 
-	if !m.AdditionalEnvFiles.IsNull() {
-		var v []string
-		m.AdditionalEnvFiles.ElementsAs(ctx, &v, false)
-		cfg.AdditionalEnvFiles = v
+	if !m.AdditionalEnvFiles.IsNull() && !m.AdditionalEnvFiles.IsUnknown() {
+		var rows []struct {
+			Path  types.String `tfsdk:"path"`
+			Track types.Bool   `tfsdk:"track"`
+		}
+		m.AdditionalEnvFiles.ElementsAs(ctx, &rows, false)
+		out := make([]client.AdditionalEnvFile, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, client.AdditionalEnvFile{
+				Path:  r.Path.ValueString(),
+				Track: r.Track.IsNull() || r.Track.ValueBool(),
+			})
+		}
+		cfg.AdditionalEnvFiles = out
 	}
 
 	if !m.ExtraArgs.IsNull() {
@@ -411,6 +521,12 @@ func stackConfigFromModel(ctx context.Context, m *StackResourceModel) client.Sta
 		var v []string
 		m.BuildExtraArgs.ElementsAs(ctx, &v, false)
 		cfg.BuildExtraArgs = v
+	}
+
+	if !m.ComposeCmdWrapperInclude.IsNull() && !m.ComposeCmdWrapperInclude.IsUnknown() {
+		var v []string
+		m.ComposeCmdWrapperInclude.ElementsAs(ctx, &v, false)
+		cfg.ComposeCmdWrapperInclude = v
 	}
 
 	if !m.IgnoreServices.IsNull() {
@@ -473,10 +589,37 @@ func mapListToModel(vals []string, current types.List) types.List {
 	return current
 }
 
+// mapAdditionalEnvFilesToModel converts the API-side []AdditionalEnvFile back
+// to the Terraform list-of-objects shape. Mirrors mapListToModel's null/empty
+// handling so config that omits the attribute round-trips cleanly.
+func mapAdditionalEnvFilesToModel(ctx context.Context, vals []client.AdditionalEnvFile, current types.List) types.List {
+	if len(vals) == 0 {
+		if current.IsNull() {
+			return current
+		}
+		return types.ListNull(additionalEnvFileObjectType)
+	}
+	objs := make([]attr.Value, 0, len(vals))
+	for _, v := range vals {
+		o, diags := types.ObjectValue(additionalEnvFileObjectType.AttrTypes, map[string]attr.Value{
+			"path":  types.StringValue(v.Path),
+			"track": types.BoolValue(v.Track),
+		})
+		if diags.HasError() {
+			continue
+		}
+		objs = append(objs, o)
+	}
+	list, _ := types.ListValue(additionalEnvFileObjectType, objs)
+	return list
+}
+
 func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *StackResourceModel) {
 	m.ID = types.StringValue(s.ID)
 	m.Name = types.StringValue(s.Name)
 	m.ServerID = types.StringValue(s.Config.ServerID)
+	m.SwarmID = types.StringValue(s.Config.SwarmID)
+	m.LinkedRepo = types.StringValue(s.Config.LinkedRepo)
 	m.ProjectName = types.StringValue(s.Config.ProjectName)
 	m.GitProvider = types.StringValue(s.Config.GitProvider)
 	m.GitAccount = types.StringValue(s.Config.GitAccount)
@@ -485,6 +628,8 @@ func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *
 	m.Repo = types.StringValue(s.Config.Repo)
 	m.Branch = types.StringValue(s.Config.Branch)
 	m.Commit = types.StringValue(s.Config.Commit)
+	m.ClonePath = types.StringValue(s.Config.ClonePath)
+	m.ComposeCmdWrapper = types.StringValue(s.Config.ComposeCmdWrapper)
 	// file_contents is not overridden from the API — the .tf config is authoritative.
 	// The API may normalize whitespace/newlines, which would cause perpetual diffs.
 	m.Environment = types.StringValue(strings.TrimRight(s.Config.Environment, "\n"))
@@ -493,10 +638,12 @@ func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *
 	m.WebhookSecret = types.StringValue(s.Config.WebhookSecret)
 
 	m.FilePaths = mapListToModel(s.Config.FilePaths, m.FilePaths)
-	m.AdditionalEnvFiles = mapListToModel(s.Config.AdditionalEnvFiles, m.AdditionalEnvFiles)
+	m.Links = mapListToModel(s.Config.Links, m.Links)
 	m.ExtraArgs = mapListToModel(s.Config.ExtraArgs, m.ExtraArgs)
 	m.BuildExtraArgs = mapListToModel(s.Config.BuildExtraArgs, m.BuildExtraArgs)
+	m.ComposeCmdWrapperInclude = mapListToModel(s.Config.ComposeCmdWrapperInclude, m.ComposeCmdWrapperInclude)
 	m.IgnoreServices = mapListToModel(s.Config.IgnoreServices, m.IgnoreServices)
+	m.AdditionalEnvFiles = mapAdditionalEnvFilesToModel(ctx, s.Config.AdditionalEnvFiles, m.AdditionalEnvFiles)
 
 	if s.Config.AutoPull != nil {
 		m.AutoPull = types.BoolValue(*s.Config.AutoPull)
@@ -504,11 +651,23 @@ func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *
 	if s.Config.RunBuild != nil {
 		m.RunBuild = types.BoolValue(*s.Config.RunBuild)
 	}
+	if s.Config.PollForUpdates != nil {
+		m.PollForUpdates = types.BoolValue(*s.Config.PollForUpdates)
+	}
 	if s.Config.AutoUpdate != nil {
 		m.AutoUpdate = types.BoolValue(*s.Config.AutoUpdate)
 	}
+	if s.Config.AutoUpdateAllServices != nil {
+		m.AutoUpdateAllServices = types.BoolValue(*s.Config.AutoUpdateAllServices)
+	}
 	if s.Config.DestroyBeforeDeploy != nil {
 		m.DestroyBeforeDeploy = types.BoolValue(*s.Config.DestroyBeforeDeploy)
+	}
+	if s.Config.SkipSecretInterp != nil {
+		m.SkipSecretInterp = types.BoolValue(*s.Config.SkipSecretInterp)
+	}
+	if s.Config.Reclone != nil {
+		m.Reclone = types.BoolValue(*s.Config.Reclone)
 	}
 	if s.Config.GitHTTPS != nil {
 		m.GitHTTPS = types.BoolValue(*s.Config.GitHTTPS)
@@ -741,13 +900,18 @@ func (r *StackResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	// Normalize empty lists to null so they round-trip consistently
 	// (the API treats [] and unset identically).
 	for _, lp := range []*types.List{
-		&plan.FilePaths, &plan.AdditionalEnvFiles,
-		&plan.ExtraArgs, &plan.BuildExtraArgs, &plan.IgnoreServices,
+		&plan.FilePaths, &plan.Links,
+		&plan.ExtraArgs, &plan.BuildExtraArgs,
+		&plan.ComposeCmdWrapperInclude, &plan.IgnoreServices,
 	} {
 		if !lp.IsNull() && !lp.IsUnknown() && len(lp.Elements()) == 0 {
 			*lp = types.ListNull(types.StringType)
 			changed = true
 		}
+	}
+	if !plan.AdditionalEnvFiles.IsNull() && !plan.AdditionalEnvFiles.IsUnknown() && len(plan.AdditionalEnvFiles.Elements()) == 0 {
+		plan.AdditionalEnvFiles = types.ListNull(additionalEnvFileObjectType)
+		changed = true
 	}
 
 	if changed {
