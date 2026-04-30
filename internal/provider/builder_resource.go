@@ -76,7 +76,7 @@ func (r *BuilderResource) Create(ctx context.Context, req resource.CreateRequest
 
 	builder, err := r.client.CreateBuilder(ctx, client.CreateBuilderParams{
 		Name:   plan.Name.ValueString(),
-		Config: client.BuilderConfig{ServerID: plan.ServerID.ValueString()},
+		Config: client.BuilderConfig{ServerID: resolveServerID(ctx, r.client, plan.ServerID.ValueString())},
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating builder", err.Error())
@@ -86,7 +86,7 @@ func (r *BuilderResource) Create(ctx context.Context, req resource.CreateRequest
 	tagsFromPlan := plan.Tags
 	plan.ID = types.StringValue(builder.ID)
 	plan.Name = types.StringValue(builder.Name)
-	plan.ServerID = types.StringValue(builder.Config.ServerID)
+	plan.ServerID = types.StringValue(preserveServerIDName(ctx, r.client, plan.ServerID.ValueString(), builder.Config.ServerID))
 	plan.Tags = mapTagsToModel(ctx, r.client, builder.Tags, plan.Tags)
 	applyResourceTags(ctx, r.client, "Builder", builder.ID, tagsFromPlan, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
@@ -115,7 +115,7 @@ func (r *BuilderResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	state.ID = types.StringValue(builder.ID)
 	state.Name = types.StringValue(builder.Name)
-	state.ServerID = types.StringValue(builder.Config.ServerID)
+	state.ServerID = types.StringValue(preserveServerIDName(ctx, r.client, state.ServerID.ValueString(), builder.Config.ServerID))
 	state.Tags = mapTagsToModel(ctx, r.client, builder.Tags, state.Tags)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -144,7 +144,7 @@ func (r *BuilderResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	builder, err := r.client.UpdateBuilder(ctx, client.UpdateBuilderParams{
 		ID:     state.ID.ValueString(),
-		Config: client.BuilderConfig{ServerID: plan.ServerID.ValueString()},
+		Config: client.BuilderConfig{ServerID: resolveServerID(ctx, r.client, plan.ServerID.ValueString())},
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating builder", err.Error())
@@ -154,7 +154,7 @@ func (r *BuilderResource) Update(ctx context.Context, req resource.UpdateRequest
 	tagsFromPlan := plan.Tags
 	plan.ID = types.StringValue(builder.ID)
 	plan.Name = types.StringValue(builder.Name)
-	plan.ServerID = types.StringValue(builder.Config.ServerID)
+	plan.ServerID = types.StringValue(preserveServerIDName(ctx, r.client, plan.ServerID.ValueString(), builder.Config.ServerID))
 	plan.Tags = mapTagsToModel(ctx, r.client, builder.Tags, plan.Tags)
 	applyResourceTags(ctx, r.client, "Builder", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
@@ -183,32 +183,7 @@ func (r *BuilderResource) ImportState(ctx context.Context, req resource.ImportSt
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *BuilderResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || r.client == nil {
-		return
-	}
-	var plan BuilderResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if plan.ServerID.IsUnknown() || plan.ServerID.IsNull() {
-		return
-	}
-	configServerID := plan.ServerID.ValueString()
-	var priorServerID string
-	if !req.State.Raw.IsNull() {
-		var priorState BuilderResourceModel
-		if diags := req.State.Get(ctx, &priorState); !diags.HasError() {
-			priorServerID = priorState.ServerID.ValueString()
-		}
-	}
-	if resolved := resolveServerID(ctx, r.client, configServerID); resolved != configServerID {
-		if resolved == priorServerID && priorServerID != "" {
-			plan.ServerID = types.StringValue(resolved)
-		} else {
-			plan.ServerID = types.StringUnknown()
-		}
-		resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
-	}
+func (r *BuilderResource) ModifyPlan(_ context.Context, _ resource.ModifyPlanRequest, _ *resource.ModifyPlanResponse) {
+	// server_id name→ID drift is handled by Create/Update + preserveServerIDName
+	// in mapBuilderToModel-equivalent code. No plan modification needed.
 }

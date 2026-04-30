@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -215,16 +216,17 @@ func mapBuildToModel(ctx context.Context, c *client.Client, b *client.Build, m *
 	m.Commit = types.StringValue(b.Config.Commit)
 	m.BuildPath = types.StringValue(b.Config.BuildPath)
 	m.DockerfilePath = types.StringValue(b.Config.DockerfilePath)
-	m.Dockerfile = types.StringValue(b.Config.Dockerfile)
-	m.BuildArgs = types.StringValue(b.Config.BuildArgs)
-	m.Labels = types.StringValue(b.Config.Labels)
+	// Komodo appends a trailing newline to these multi-line strings on store.
+	m.Dockerfile = types.StringValue(strings.TrimRight(b.Config.Dockerfile, "\n"))
+	m.BuildArgs = types.StringValue(strings.TrimRight(b.Config.BuildArgs, "\n"))
+	m.Labels = types.StringValue(strings.TrimRight(b.Config.Labels, "\n"))
 	m.WebhookSecret = types.StringValue(b.Config.WebhookSecret)
 
 	m.Links = mapListToModel(b.Config.Links, m.Links)
 
 	if b.Config.PreBuild != nil {
-		m.PreBuildPath = types.StringValue(b.Config.PreBuild.Path)
-		m.PreBuildCommand = types.StringValue(b.Config.PreBuild.Command)
+		m.PreBuildPath = types.StringValue(strings.TrimRight(b.Config.PreBuild.Path, "\n"))
+		m.PreBuildCommand = types.StringValue(strings.TrimRight(b.Config.PreBuild.Command, "\n"))
 	} else {
 		m.PreBuildPath = types.StringValue("")
 		m.PreBuildCommand = types.StringValue("")

@@ -86,7 +86,7 @@ func (r *RepoResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			"webhook_secret":     schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Alternate webhook secret for this repo."},
 			"links":              schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "Quick links displayed in the Komodo UI."},
 			"environment":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Environment variables (KEY=VALUE, newline separated) for on_clone / on_pull commands."},
-			"env_file_path":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Filename to write environment to."},
+			"env_file_path":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(".env"), Description: "Filename to write environment to. Komodo defaults this to .env if empty."},
 			"skip_secret_interp": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Skip Komodo variable / secret interpolation in environment."},
 			"tags":               schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this repo."},
 		},
@@ -145,7 +145,7 @@ func repoConfigFromModel(ctx context.Context, m *RepoResourceModel) client.RepoC
 func mapRepoToModel(ctx context.Context, c *client.Client, r *client.Repo, m *RepoResourceModel) {
 	m.ID = types.StringValue(r.ID)
 	m.Name = types.StringValue(r.Name)
-	m.ServerID = types.StringValue(r.Config.ServerID)
+	m.ServerID = types.StringValue(preserveServerIDName(ctx, c, m.ServerID.ValueString(), r.Config.ServerID))
 	m.BuilderID = types.StringValue(r.Config.BuilderID)
 	m.GitProvider = types.StringValue(r.Config.GitProvider)
 	m.GitAccount = types.StringValue(r.Config.GitAccount)
@@ -194,12 +194,11 @@ func (r *RepoResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	if resolved := resolveServerID(ctx, r.client, plan.ServerID.ValueString()); resolved != plan.ServerID.ValueString() {
-		plan.ServerID = types.StringValue(resolved)
-	}
+	cfg := repoConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
 
 	repo, err := r.client.CreateRepo(ctx, client.CreateRepoParams{
-		Name: plan.Name.ValueString(), Config: repoConfigFromModel(ctx, &plan),
+		Name: plan.Name.ValueString(), Config: cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating repo", err.Error())
@@ -259,8 +258,11 @@ func (r *RepoResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		}
 	}
 
+	cfg := repoConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
+
 	repo, err := r.client.UpdateRepo(ctx, client.UpdateRepoParams{
-		ID: state.ID.ValueString(), Config: repoConfigFromModel(ctx, &plan),
+		ID: state.ID.ValueString(), Config: cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating repo", err.Error())
@@ -296,37 +298,8 @@ func (r *RepoResource) ImportState(ctx context.Context, req resource.ImportState
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *RepoResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || r.client == nil {
-		return
-	}
-	var plan RepoResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if plan.ServerID.IsUnknown() || plan.ServerID.IsNull() {
-		return
-	}
-	// Only suppress drift for *existing* resources where a server name in
-	// config resolves to the canonical ID already in state. For Create, leave
-	// the literal config value alone — Create() resolves it before the API
-	// call. Setting StringUnknown here on Create violates Terraform's rule
-	// that the planned value must match config.
-	configServerID := plan.ServerID.ValueString()
-	if req.State.Raw.IsNull() {
-		return
-	}
-	var priorState RepoResourceModel
-	if diags := req.State.Get(ctx, &priorState); diags.HasError() {
-		return
-	}
-	priorServerID := priorState.ServerID.ValueString()
-	if priorServerID == "" || configServerID == priorServerID {
-		return
-	}
-	if resolved := resolveServerID(ctx, r.client, configServerID); resolved == priorServerID {
-		plan.ServerID = types.StringValue(priorServerID)
-		resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
-	}
+func (r *RepoResource) ModifyPlan(_ context.Context, _ resource.ModifyPlanRequest, _ *resource.ModifyPlanResponse) {
+	// server_id name→ID drift is handled by Create/Update calling
+	// resolveServerID for the API request and mapRepoToModel using
+	// preserveServerIDName so state keeps the user's literal.
 }

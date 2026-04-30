@@ -150,6 +150,10 @@ func (r *OnboardingKeyResource) Create(ctx context.Context, req resource.CreateR
 		params.Tags = tags
 	}
 
+	// Capture user intent BEFORE mapping the API response, since the API
+	// always returns enabled=true on Create regardless of what we want.
+	wantEnabled := plan.Enabled.IsNull() || plan.Enabled.IsUnknown() || plan.Enabled.ValueBool()
+
 	created, err := r.client.CreateOnboardingKey(ctx, params)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating onboarding key", err.Error())
@@ -159,11 +163,9 @@ func (r *OnboardingKeyResource) Create(ctx context.Context, req resource.CreateR
 	mapOnboardingKeyToModel(&created.Created, &plan)
 	plan.PrivateKey = types.StringValue(created.PrivateKey)
 
-	// Disable on first read if the user requested enabled=false; the create
-	// endpoint always produces an enabled key.
-	if !plan.Enabled.IsNull() && !plan.Enabled.IsUnknown() && !plan.Enabled.ValueBool() {
+	if !wantEnabled {
 		enabled := false
-		_, err := r.client.UpdateOnboardingKey(ctx, client.UpdateOnboardingKeyParams{
+		updated, err := r.client.UpdateOnboardingKey(ctx, client.UpdateOnboardingKeyParams{
 			PublicKey: created.Created.PublicKey,
 			Enabled:   &enabled,
 		})
@@ -171,6 +173,9 @@ func (r *OnboardingKeyResource) Create(ctx context.Context, req resource.CreateR
 			resp.Diagnostics.AddError("Error disabling onboarding key after create", err.Error())
 			return
 		}
+		priv := plan.PrivateKey
+		mapOnboardingKeyToModel(updated, &plan)
+		plan.PrivateKey = priv
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -279,7 +284,7 @@ func mapOnboardingKeyToModel(k *client.OnboardingKey, m *OnboardingKeyResourceMo
 	if len(k.Tags) > 0 {
 		list, _ := types.ListValueFrom(context.Background(), types.StringType, k.Tags)
 		m.Tags = list
-	} else if !m.Tags.IsNull() && !m.Tags.IsUnknown() {
+	} else {
 		m.Tags = types.ListNull(types.StringType)
 	}
 }

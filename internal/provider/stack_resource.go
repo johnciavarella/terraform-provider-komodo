@@ -617,7 +617,7 @@ func mapAdditionalEnvFilesToModel(ctx context.Context, vals []client.AdditionalE
 func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *StackResourceModel) {
 	m.ID = types.StringValue(s.ID)
 	m.Name = types.StringValue(s.Name)
-	m.ServerID = types.StringValue(s.Config.ServerID)
+	m.ServerID = types.StringValue(preserveServerIDName(ctx, c, m.ServerID.ValueString(), s.Config.ServerID))
 	m.SwarmID = types.StringValue(s.Config.SwarmID)
 	m.LinkedRepo = types.StringValue(s.Config.LinkedRepo)
 	m.ProjectName = types.StringValue(s.Config.ProjectName)
@@ -704,16 +704,13 @@ func (r *StackResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	if resolved := resolveServerID(ctx, r.client, plan.ServerID.ValueString()); resolved != plan.ServerID.ValueString() {
-		plan.ServerID = types.StringValue(resolved)
-	}
+	cfg := stackConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
 
-	params := client.CreateStackParams{
+	stack, err := r.client.CreateStack(ctx, client.CreateStackParams{
 		Name:   plan.Name.ValueString(),
-		Config: stackConfigFromModel(ctx, &plan),
-	}
-
-	stack, err := r.client.CreateStack(ctx, params)
+		Config: cfg,
+	})
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating stack",
@@ -801,16 +798,13 @@ func (r *StackResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 	}
 
-	if resolved := resolveServerID(ctx, r.client, plan.ServerID.ValueString()); resolved != plan.ServerID.ValueString() {
-		plan.ServerID = types.StringValue(resolved)
-	}
+	cfg := stackConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
 
-	params := client.UpdateStackParams{
+	stack, err := r.client.UpdateStack(ctx, client.UpdateStackParams{
 		ID:     state.ID.ValueString(),
-		Config: stackConfigFromModel(ctx, &plan),
-	}
-
-	stack, err := r.client.UpdateStack(ctx, params)
+		Config: cfg,
+	})
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error updating stack",
@@ -872,30 +866,8 @@ func (r *StackResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		return
 	}
 
+	// server_id drift handled by Create/Update + preserveServerIDName.
 	changed := false
-
-	// Suppress server name→ID drift for existing resources: if the configured
-	// value (e.g. "dockerai") resolves to the canonical ID already in state,
-	// use the state value so Terraform sees no change.
-	// For new resources the config value is left as-is; Create/Update resolve
-	// the name before the API call and then restore the original value into
-	// state so that "dockerai" round-trips without needing a data source.
-	if !plan.ServerID.IsUnknown() && !plan.ServerID.IsNull() {
-		configServerID := plan.ServerID.ValueString()
-		var priorServerID string
-		if !req.State.Raw.IsNull() {
-			var priorState StackResourceModel
-			if diags := req.State.Get(ctx, &priorState); !diags.HasError() {
-				priorServerID = priorState.ServerID.ValueString()
-			}
-		}
-		if configServerID != priorServerID && priorServerID != "" {
-			if resolved := resolveServerID(ctx, r.client, configServerID); resolved == priorServerID {
-				plan.ServerID = types.StringValue(priorServerID)
-				changed = true
-			}
-		}
-	}
 
 	// Normalize empty lists to null so they round-trip consistently
 	// (the API treats [] and unset identically).

@@ -815,9 +815,9 @@ func (c *Client) RenameTag(ctx context.Context, id string, name string) (*Tag, e
 	return &t, err
 }
 
-func (c *Client) UpdateTagColor(ctx context.Context, id string, color string) (*Tag, error) {
+func (c *Client) UpdateTagColor(ctx context.Context, idOrName string, color string) (*Tag, error) {
 	var t Tag
-	err := c.Write(ctx, "UpdateTagColor", map[string]string{"id": id, "color": color}, &t)
+	err := c.Write(ctx, "UpdateTagColor", map[string]string{"tag": idOrName, "color": color}, &t)
 	return &t, err
 }
 
@@ -846,8 +846,52 @@ func (c *Client) UpdateResourceMeta(ctx context.Context, targetType, id string, 
 
 // ---- Builder ----
 
+// BuilderConfig is an adjacently-tagged enum on the wire:
+//
+//	{"type": "Server", "params": {"server_id": "..."}}
+//	{"type": "Url",    "params": {...}}
+//	{"type": "Aws",    "params": {...}}
+//
+// The provider currently exposes only the "Server" variant. Custom Marshal /
+// Unmarshal keep the Go-side shape flat so callers can use Config.ServerID.
 type BuilderConfig struct {
-	ServerID string `json:"server_id,omitempty"`
+	ServerID string `json:"-"`
+}
+
+func (c BuilderConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type   string `json:"type"`
+		Params struct {
+			ServerID string `json:"server_id,omitempty"`
+		} `json:"params"`
+	}{
+		Type: "Server",
+		Params: struct {
+			ServerID string `json:"server_id,omitempty"`
+		}{ServerID: c.ServerID},
+	})
+}
+
+func (c *BuilderConfig) UnmarshalJSON(data []byte) error {
+	var wrapper struct {
+		Type   string `json:"type"`
+		Params struct {
+			ServerID string `json:"server_id,omitempty"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		// Fall back to flat decode for backwards compatibility.
+		var flat struct {
+			ServerID string `json:"server_id,omitempty"`
+		}
+		if err2 := json.Unmarshal(data, &flat); err2 != nil {
+			return err
+		}
+		c.ServerID = flat.ServerID
+		return nil
+	}
+	c.ServerID = wrapper.Params.ServerID
+	return nil
 }
 
 type Builder struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -300,7 +301,7 @@ func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel) 
 func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deployment, m *DeploymentResourceModel) {
 	m.ID = types.StringValue(d.ID)
 	m.Name = types.StringValue(d.Name)
-	m.ServerID = types.StringValue(d.Config.ServerID)
+	m.ServerID = types.StringValue(preserveServerIDName(ctx, c, m.ServerID.ValueString(), d.Config.ServerID))
 	m.SwarmID = types.StringValue(d.Config.SwarmID)
 	m.ImageType = types.StringValue(d.Config.Image.Type)
 	if d.Config.Image.Type == "Build" {
@@ -334,10 +335,12 @@ func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deplo
 		m.TerminationTimeout = types.Int64Value(int64(*d.Config.TerminationTimeout))
 	}
 
-	m.Ports = types.StringValue(d.Config.Ports)
-	m.Volumes = types.StringValue(d.Config.Volumes)
-	m.Environment = types.StringValue(d.Config.Environment)
-	m.Labels = types.StringValue(d.Config.Labels)
+	// Komodo appends a trailing newline when storing these multi-line strings.
+	// Trim so plan/apply round-trips don't show fake drift.
+	m.Ports = types.StringValue(strings.TrimRight(d.Config.Ports, "\n"))
+	m.Volumes = types.StringValue(strings.TrimRight(d.Config.Volumes, "\n"))
+	m.Environment = types.StringValue(strings.TrimRight(d.Config.Environment, "\n"))
+	m.Labels = types.StringValue(strings.TrimRight(d.Config.Labels, "\n"))
 
 	m.Links = mapListToModel(d.Config.Links, m.Links)
 
@@ -379,12 +382,11 @@ func (r *DeploymentResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	if resolved := resolveServerID(ctx, r.client, plan.ServerID.ValueString()); resolved != plan.ServerID.ValueString() {
-		plan.ServerID = types.StringValue(resolved)
-	}
+	cfg := deploymentConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
 
 	deployment, err := r.client.CreateDeployment(ctx, client.CreateDeploymentParams{
-		Name: plan.Name.ValueString(), Config: deploymentConfigFromModel(ctx, &plan),
+		Name: plan.Name.ValueString(), Config: cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating deployment", err.Error())
@@ -451,8 +453,11 @@ func (r *DeploymentResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 	}
 
+	cfg := deploymentConfigFromModel(ctx, &plan)
+	cfg.ServerID = resolveServerID(ctx, r.client, plan.ServerID.ValueString())
+
 	deployment, err := r.client.UpdateDeployment(ctx, client.UpdateDeploymentParams{
-		ID: state.ID.ValueString(), Config: deploymentConfigFromModel(ctx, &plan),
+		ID: state.ID.ValueString(), Config: cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating deployment", err.Error())
@@ -505,33 +510,10 @@ func (r *DeploymentResource) ModifyPlan(ctx context.Context, req resource.Modify
 		return
 	}
 
-	changed := false
-
-	// Suppress server-name → canonical-ID drift for existing resources only.
-	// During Create the config value flows through unchanged; Create() calls
-	// resolveServerID before the API request. Setting StringUnknown on Create
-	// would violate Terraform's "planned value must match config" rule.
-	if !plan.ServerID.IsUnknown() && !plan.ServerID.IsNull() && !req.State.Raw.IsNull() {
-		configServerID := plan.ServerID.ValueString()
-		var priorState DeploymentResourceModel
-		if diags := req.State.Get(ctx, &priorState); !diags.HasError() {
-			priorServerID := priorState.ServerID.ValueString()
-			if priorServerID != "" && configServerID != priorServerID {
-				if resolved := resolveServerID(ctx, r.client, configServerID); resolved == priorServerID {
-					plan.ServerID = types.StringValue(priorServerID)
-					changed = true
-				}
-			}
-		}
-	}
-
-	// Normalize empty extra_args list to null so it round-trips consistently with Read.
+	// server_id drift handled by Create/Update + preserveServerIDName.
+	// Normalize empty extra_args list to null so it round-trips with Read.
 	if !plan.ExtraArgs.IsNull() && !plan.ExtraArgs.IsUnknown() && len(plan.ExtraArgs.Elements()) == 0 {
 		plan.ExtraArgs = types.ListNull(types.StringType)
-		changed = true
-	}
-
-	if changed {
 		resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 	}
 }

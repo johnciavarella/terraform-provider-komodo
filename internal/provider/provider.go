@@ -116,6 +116,29 @@ func (p *KomodoProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	resp.ResourceData = c
 }
 
+// preserveServerIDName chooses the friendliest representation of a server
+// reference for state. It returns:
+//   - the user's existing name-form value if it resolves to the API's
+//     canonical ID (avoids "Local"→ObjectID drift on round-trips);
+//   - the server's display name on a fresh state (e.g. terraform import),
+//     so users typing `server_id = "Local"` in config see no diff after
+//     `terraform import` of an existing resource;
+//   - the canonical ID as a last resort.
+func preserveServerIDName(ctx context.Context, c *client.Client, currentID, apiID string) string {
+	if currentID != "" && currentID == apiID {
+		return apiID
+	}
+	if currentID != "" && resolveServerID(ctx, c, currentID) == apiID {
+		return currentID
+	}
+	if currentID == "" && apiID != "" && c != nil {
+		if s, err := c.GetServer(ctx, apiID); err == nil && s.Name != "" {
+			return s.Name
+		}
+	}
+	return apiID
+}
+
 // resolveServerID looks up the server by name/ID and returns its canonical ID.
 // It first tries a direct GetServer call (works for IDs and named servers),
 // then falls back to listing all servers and matching by name (handles cases
