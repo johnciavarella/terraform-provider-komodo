@@ -2,11 +2,11 @@
 
 A Terraform provider for managing infrastructure on the [Komodo](https://komo.do) build and deployment system using the [Komodo Core API](https://docs.rs/komodo_client/latest/komodo_client/api/index.html).
 
-Targets **Komodo Core v2.1.x**. For users upgrading from earlier provider versions, see [Upgrading](#upgrading-from-01x).
+Targets **Komodo Core v2.1.x**. For users upgrading from earlier provider versions, see [Upgrading](#upgrading-from-1x).
 
 ## Table of Contents
 
-- [Upgrading from 0.1.x](#upgrading-from-01x)
+- [Upgrading from 1.x](#upgrading-from-1x)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Authentication](#authentication)
@@ -30,9 +30,9 @@ Targets **Komodo Core v2.1.x**. For users upgrading from earlier provider versio
 - [Examples](#examples)
 - [Development](#development)
 
-## Upgrading from 0.1.x
+## Upgrading from 1.x
 
-Provider 0.2.0 targets Komodo Core v2.1.x. A few schema changes require config edits before `terraform apply`:
+Provider 2.0.0 targets Komodo Core v2.1.x. A few schema changes require config edits before `terraform apply`:
 
 - **Repo `on_clone` / `on_pull` are now flattened pairs.** Old:
 
@@ -85,7 +85,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "johnciavarella/komodo"
-      version = "~> 0.2"
+      version = "~> 2.0"
     }
   }
 }
@@ -107,8 +107,8 @@ Download the appropriate binary for your platform from the releases page and pla
 
 ```bash
 # Example for macOS ARM64
-mkdir -p ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/0.2.0/darwin_arm64
-cp terraform-provider-komodo ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/0.2.0/darwin_arm64/
+mkdir -p ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/2.0.0/darwin_arm64
+cp terraform-provider-komodo ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/2.0.0/darwin_arm64/
 ```
 
 ## Authentication
@@ -122,7 +122,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "registry.terraform.io/johnciavarella/komodo"
-      version = "0.1.0"
+      version = "2.0.0"
     }
   }
 }
@@ -759,7 +759,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "registry.terraform.io/johnciavarella/komodo"
-      version = "0.1.0"
+      version = "2.0.0"
     }
   }
 }
