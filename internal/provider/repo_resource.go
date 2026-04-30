@@ -75,7 +75,7 @@ func (r *RepoResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			"git_https":          schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Use HTTPS to clone."},
 			"git_account":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git account for private repos."},
 			"repo":               schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git repository (namespace/repo_name)."},
-			"branch":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Branch."},
+			"branch":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("main"), Description: "Branch. Komodo defaults this to \"main\" if empty."},
 			"commit":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Specific commit hash."},
 			"path":               schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Path on the server where the repo is cloned. Defaults to the repo name."},
 			"on_clone_path":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Working directory for the on_clone command."},

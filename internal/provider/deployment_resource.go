@@ -511,7 +511,9 @@ func (r *DeploymentResource) ModifyPlan(ctx context.Context, req resource.Modify
 	}
 
 	// server_id drift handled by Create/Update + preserveServerIDName.
-	// Normalize empty extra_args list to null so it round-trips with Read.
+	// Normalize empty extra_args list to null so it round-trips with Read
+	// (Komodo treats null and [] identically on the wire, so we collapse
+	// them to a single canonical form here to avoid perpetual diff).
 	if !plan.ExtraArgs.IsNull() && !plan.ExtraArgs.IsUnknown() && len(plan.ExtraArgs.Elements()) == 0 {
 		plan.ExtraArgs = types.ListNull(types.StringType)
 		resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)

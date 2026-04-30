@@ -1012,11 +1012,14 @@ func (c *Client) FindUser(ctx context.Context, idOrName string) (*User, error) {
 }
 
 func (c *Client) UpdateUserBasePermissions(ctx context.Context, userID string, enabled, createServer, createBuild bool) error {
+	// Note the v2 request-side field renames: `create_servers` / `create_builds`.
+	// The corresponding response fields on the User struct are still
+	// `create_server_permissions` / `create_build_permissions`.
 	return c.Write(ctx, "UpdateUserBasePermissions", map[string]interface{}{
-		"user_id":                   userID,
-		"enabled":                   enabled,
-		"create_server_permissions": createServer,
-		"create_build_permissions":  createBuild,
+		"user_id":        userID,
+		"enabled":        enabled,
+		"create_servers": createServer,
+		"create_builds":  createBuild,
 	}, nil)
 }
 

@@ -101,10 +101,10 @@ func (r *BuildResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"git_https":              schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Use HTTPS to clone."},
 			"git_account":            schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git account for private repos."},
 			"repo":                   schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Git repository (namespace/repo_name)."},
-			"branch":                 schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Branch of the repo."},
+			"branch":                 schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("main"), Description: "Branch of the repo. Komodo defaults this to \"main\" if empty."},
 			"commit":                 schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Specific commit hash."},
 			"build_path":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Build context path."},
-			"dockerfile_path":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Path to Dockerfile."},
+			"dockerfile_path":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("Dockerfile"), Description: "Path to Dockerfile. Komodo defaults this to \"Dockerfile\" if empty."},
 			"dockerfile":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Inline Dockerfile contents (alternative to dockerfile_path)."},
 			"image_registry": schema.ListNestedAttribute{
 				Description: "Registries to push the built image to. Each entry has domain, account, organization.",
