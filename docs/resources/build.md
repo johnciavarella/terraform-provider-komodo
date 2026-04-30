@@ -22,13 +22,13 @@ Manages a Komodo build (Docker image build configuration).
 ### Optional
 
 - `auto_increment_version` (Boolean) Auto-increment patch version on every build.
-- `branch` (String) Branch of the repo.
+- `branch` (String) Branch of the repo. Komodo defaults this to "main" if empty.
 - `build_args` (String) Build arguments.
 - `build_path` (String) Build context path.
 - `builder_id` (String) Builder used to build the image (ID or name).
 - `commit` (String) Specific commit hash.
 - `dockerfile` (String) Inline Dockerfile contents (alternative to dockerfile_path).
-- `dockerfile_path` (String) Path to Dockerfile.
+- `dockerfile_path` (String) Path to Dockerfile. Komodo defaults this to "Dockerfile" if empty.
 - `files_on_host` (Boolean) Source files from host.
 - `git_account` (String) Git account for private repos.
 - `git_https` (Boolean) Use HTTPS to clone.

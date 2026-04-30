@@ -21,10 +21,10 @@ Manages a Komodo repo (a git repository cloned on a server).
 
 ### Optional
 
-- `branch` (String) Branch.
+- `branch` (String) Branch. Komodo defaults this to "main" if empty.
 - `builder_id` (String) Builder to clone onto (ID or name). Set this OR server_id, not both.
 - `commit` (String) Specific commit hash.
-- `env_file_path` (String) Filename to write environment to.
+- `env_file_path` (String) Filename to write environment to. Komodo defaults this to .env if empty.
 - `environment` (String) Environment variables (KEY=VALUE, newline separated) for on_clone / on_pull commands.
 - `git_account` (String) Git account for private repos.
 - `git_https` (Boolean) Use HTTPS to clone.

@@ -38,3 +38,4 @@ provider "komodo" {
 - `api_key` (String, Sensitive) API key for authentication. Can also be set via the KOMODO_API_KEY environment variable.
 - `api_secret` (String, Sensitive) API secret for authentication. Can also be set via the KOMODO_API_SECRET environment variable.
 - `base_url` (String) Base URL of the Komodo Core API (e.g., https://komodo.example.com). Can also be set via the KOMODO_ADDRESS environment variable.
+- `insecure_skip_verify` (Boolean) Skip TLS certificate verification when calling Komodo Core. Use only for local-test instances behind self-signed certs.
