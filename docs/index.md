@@ -16,7 +16,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "johnciavarella/komodo"
-      version = "~> 0.1"
+      version = "~> 2.0"
     }
   }
 }
@@ -27,6 +27,9 @@ provider "komodo" {
   base_url   = "https://komodo.example.com"
   api_key    = var.komodo_api_key
   api_secret = var.komodo_api_secret
+
+  # Set to true only for local-test instances behind a self-signed cert.
+  insecure_skip_verify = false
 }
 ```
 
@@ -38,3 +41,4 @@ provider "komodo" {
 - `api_key` (String, Sensitive) API key for authentication. Can also be set via the KOMODO_API_KEY environment variable.
 - `api_secret` (String, Sensitive) API secret for authentication. Can also be set via the KOMODO_API_SECRET environment variable.
 - `base_url` (String) Base URL of the Komodo Core API (e.g., https://komodo.example.com). Can also be set via the KOMODO_ADDRESS environment variable.
+- `insecure_skip_verify` (Boolean) Skip TLS certificate verification when calling Komodo Core. Use only for local-test instances behind self-signed certs.

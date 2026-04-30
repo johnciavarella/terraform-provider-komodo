@@ -50,8 +50,9 @@ func (r *TagResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Required: true, Description: "Tag name.",
 			},
 			"color": schema.StringAttribute{
-				Optional: true, Computed: true, Description: "Tag color (hex).",
-				Default: stringdefault.StaticString(""),
+				Optional: true, Computed: true,
+				Description: "Tag color. v2 uses a named-color enum: Slate, LightSlate, DarkSlate, Red, LightRed, DarkRed, Orange, LightOrange, DarkOrange, Amber, LightAmber, DarkAmber, Yellow, LightYellow, DarkYellow, Lime, LightLime, DarkLime, Green, LightGreen, DarkGreen, Emerald, LightEmerald, DarkEmerald, Teal, LightTeal, DarkTeal, Cyan, LightCyan, DarkCyan, Sky, LightSky, DarkSky, Blue, LightBlue, DarkBlue, Indigo, LightIndigo, DarkIndigo, Violet, LightViolet, DarkViolet, Purple, LightPurple, DarkPurple, Fuchsia, LightFuchsia, DarkFuchsia, Pink, LightPink, DarkPink, Rose, LightRose, DarkRose. Hex strings are no longer accepted.",
+				Default:     stringdefault.StaticString(""),
 			},
 		},
 	}
