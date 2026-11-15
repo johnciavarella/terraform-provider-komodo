@@ -42,9 +42,10 @@ func (m useStateForUnknownIncludingNull) PlanModifyList(_ context.Context, req p
 }
 
 var (
-	_ resource.Resource                = &StackResource{}
-	_ resource.ResourceWithImportState = &StackResource{}
-	_ resource.ResourceWithModifyPlan  = &StackResource{}
+	_ resource.Resource                   = &StackResource{}
+	_ resource.ResourceWithImportState    = &StackResource{}
+	_ resource.ResourceWithValidateConfig = &StackResource{}
+	_ resource.ResourceWithModifyPlan     = &StackResource{}
 )
 
 type StackResource struct {
@@ -465,6 +466,33 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				ElementType: types.StringType,
 			},
 		},
+	}
+}
+
+// ValidateConfig checks config_files[*].requires. Komodo also accepts
+// lower-case spellings but stores the canonical one, which would leave the
+// applied value different from the configured one.
+func (r *StackResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var files types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("config_files"), &files)...)
+	if files.IsNull() || files.IsUnknown() {
+		return
+	}
+	for i, v := range files.Elements() {
+		obj, ok := v.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		requires, ok := obj.Attributes()["requires"].(types.String)
+		if !ok || requires.IsNull() || requires.IsUnknown() {
+			continue
+		}
+		switch requires.ValueString() {
+		case "Redeploy", "Restart", "None":
+		default:
+			resp.Diagnostics.AddAttributeError(path.Root("config_files").AtListIndex(i).AtName("requires"), "Invalid requires value",
+				fmt.Sprintf("%q is not one of: Redeploy, Restart, None.", requires.ValueString()))
+		}
 	}
 }
 
