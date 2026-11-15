@@ -896,10 +896,14 @@ func (c BuilderConfig) MarshalJSON() ([]byte, error) {
 }
 
 func (c *BuilderConfig) UnmarshalJSON(data []byte) error {
+	// Newer Komodo returns a Server builder's servers as a `server_ids` list
+	// (builds overflow to later entries); older versions return a single
+	// `server_id`. Both are accepted on write. Read whichever is present.
 	var wrapper struct {
 		Type   string `json:"type"`
 		Params struct {
-			ServerID string `json:"server_id,omitempty"`
+			ServerID  string   `json:"server_id,omitempty"`
+			ServerIDs []string `json:"server_ids,omitempty"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
@@ -914,6 +918,9 @@ func (c *BuilderConfig) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	c.ServerID = wrapper.Params.ServerID
+	if c.ServerID == "" && len(wrapper.Params.ServerIDs) > 0 {
+		c.ServerID = wrapper.Params.ServerIDs[0]
+	}
 	return nil
 }
 

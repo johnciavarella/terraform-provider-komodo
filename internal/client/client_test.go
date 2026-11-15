@@ -49,3 +49,27 @@ func TestBuildConfigVersionJSON(t *testing.T) {
 		t.Errorf("unmarshalled version = %v, want 0.4.7", cfg.Version)
 	}
 }
+
+func TestBuilderConfigServerIDFormats(t *testing.T) {
+	cases := map[string]string{
+		`{"type":"Server","params":{"server_id":"abc"}}`:          "abc", // older Komodo
+		`{"type":"Server","params":{"server_ids":["abc","def"]}}`: "abc", // Komodo 2.3: list, first is primary
+		`{"type":"Server","params":{"server_ids":[]}}`:            "",
+		`{"type":"Server","params":{}}`:                           "",
+	}
+	for in, want := range cases {
+		var c BuilderConfig
+		if err := json.Unmarshal([]byte(in), &c); err != nil {
+			t.Errorf("Unmarshal(%s): %v", in, err)
+			continue
+		}
+		if c.ServerID != want {
+			t.Errorf("Unmarshal(%s).ServerID = %q, want %q", in, c.ServerID, want)
+		}
+	}
+	// Writes keep the single-value form, which every version accepts.
+	b, _ := json.Marshal(BuilderConfig{ServerID: "abc"})
+	if want := `{"type":"Server","params":{"server_id":"abc"}}`; string(b) != want {
+		t.Errorf("Marshal = %s, want %s", b, want)
+	}
+}
