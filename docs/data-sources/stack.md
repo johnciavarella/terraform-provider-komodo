@@ -29,6 +29,7 @@ data "komodo_stack" "web" {
 
 - `branch` (String)
 - `git_provider` (String)
+- `ignore_services` (List of String) Services excluded from stack health status checks.
 - `linked_repo` (String)
 - `name` (String)
 - `project_name` (String)
