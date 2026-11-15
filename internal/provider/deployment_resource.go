@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,9 +22,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &DeploymentResource{}
-	_ resource.ResourceWithImportState = &DeploymentResource{}
-	_ resource.ResourceWithModifyPlan  = &DeploymentResource{}
+	_ resource.Resource                   = &DeploymentResource{}
+	_ resource.ResourceWithImportState    = &DeploymentResource{}
+	_ resource.ResourceWithValidateConfig = &DeploymentResource{}
+	_ resource.ResourceWithModifyPlan     = &DeploymentResource{}
 )
 
 type DeploymentResource struct {
@@ -251,6 +253,23 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				ElementType: types.StringType,
 			},
 		},
+	}
+}
+
+// containerNamePattern is Docker's container/service naming rule. Komodo
+// rewrites a custom_name that does not match it, which would leave the
+// applied value different from the configured one.
+var containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+func (r *DeploymentResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var name types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("custom_name"), &name)...)
+	if name.IsNull() || name.IsUnknown() || name.ValueString() == "" {
+		return
+	}
+	if !containerNamePattern.MatchString(name.ValueString()) {
+		resp.Diagnostics.AddAttributeError(path.Root("custom_name"), "Invalid custom_name",
+			fmt.Sprintf("%q is not a valid container name. It must start with a letter or digit and contain only letters, digits, '_', '.' and '-'.", name.ValueString()))
 	}
 }
 
