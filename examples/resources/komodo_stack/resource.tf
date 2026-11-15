@@ -1,5 +1,6 @@
 resource "komodo_stack" "web" {
   name          = "web-app"
+  description   = "Public web application"
   server_id     = "Local"
   files_on_host = true
 
@@ -11,9 +12,18 @@ resource "komodo_stack" "web" {
     { path = ".env.secret", track = false }, # passed via --env-file only
   ]
 
+  # Extra files Komodo tracks. A change counts in DeployStackIfChanged.
+  config_files = [
+    { path = "nginx.conf", services = ["web"], requires = "Restart" },
+    { path = "app.toml", requires = "Redeploy" },
+  ]
+
   pre_deploy_path    = "./"
   pre_deploy_command = "./scripts/pre-deploy.sh"
 
-  poll_for_updates = true
-  tags             = ["production"]
+  poll_for_updates          = true
+  auto_update               = true
+  auto_update_skip_services = ["db"] # never auto-update the database
+
+  tags = ["production"]
 }

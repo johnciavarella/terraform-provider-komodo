@@ -16,7 +16,7 @@ Manages a Komodo server onboarding key. Periphery presents the matching private 
 resource "komodo_onboarding_key" "fleet" {
   name           = "fleet-bootstrap"
   enabled        = true
-  expires        = 0    # 0 = no expiry; otherwise unix-millis
+  expires        = 0 # 0 = no expiry; otherwise unix-millis
   privileged     = false
   create_builder = true # also provision a Builder for each onboarded server
 }

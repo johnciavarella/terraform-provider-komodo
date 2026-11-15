@@ -6,6 +6,7 @@ Targets **Komodo Core v2.1.x**. For users upgrading from earlier provider versio
 
 ## Table of Contents
 
+- [Upgrading to 3.0](#upgrading-to-30)
 - [Upgrading from 1.x](#upgrading-from-1x)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -26,9 +27,37 @@ Targets **Komodo Core v2.1.x**. For users upgrading from earlier provider versio
   - [komodo_git_provider_account](#komodo_git_provider_account)
   - [komodo_docker_registry_account](#komodo_docker_registry_account)
   - [komodo_onboarding_key](#komodo_onboarding_key)
+  - [komodo_variable](#komodo_variable)
+  - [komodo_alerter](#komodo_alerter)
+  - [komodo_procedure](#komodo_procedure)
 - [Data Sources](#data-sources)
 - [Examples](#examples)
 - [Development](#development)
+
+## Upgrading to 3.0
+
+Provider 3.0 adds the `komodo_variable`, `komodo_alerter` and `komodo_procedure` resources and a number of fields on existing resources. No attribute was removed, renamed or changed type, and existing state loads without an upgrade step. See [CHANGELOG.md](CHANGELOG.md) for the full list.
+
+**Check these before you apply.** Three new attributes have a default that the provider enforces. Earlier versions never sent these fields, so a value set in the Komodo UI was left alone. After upgrading, the first `terraform plan` shows the change, and applying it carries it out unless you add the value to your config:
+
+| Attribute | Default | Effect on a value set in the Komodo UI |
+| --------- | ------- | -------------------------------------- |
+| `komodo_deployment.custom_name` | `""` | Cleared. Komodo also renames the running container back to the deployment name. |
+| `komodo_deployment.redeploy_on_build` | `false` | Turned off. |
+| `komodo_build.secret_args` | `""` | Secret build arguments are removed. |
+
+Other behaviour changes:
+
+- **`komodo_builder`** only sends `server_id` to Komodo when it changes. A Server builder can hold several servers in Komodo; resending the one `server_id` on every rename or tag change dropped the others.
+- **`komodo_builder.server_id`** now reads correctly on Komodo 2.3, which returns a builder's servers as a list. A builder that showed a change on every plan stops doing so.
+- **`komodo_api_key.expires`** is new and defaults to `0` (no expiry). Keys already in state take the default in place and are not replaced. Setting a non-zero `expires` replaces the key.
+
+**Unmanaged unless configured.** These new attributes are left alone when they are not in your config: nothing is sent, and the value in Komodo is not read into state. Set `[]` or `""` to clear one. `terraform import` does not read them until they are configured.
+
+- `description` and `template` on server, stack, deployment, build, repo, builder, alerter and procedure
+- `komodo_server.maintenance_windows`
+- `komodo_stack.config_files` and `komodo_stack.auto_update_skip_services`
+- `komodo_build.extra_args`
 
 ## Upgrading from 1.x
 
@@ -85,7 +114,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "johnciavarella/komodo"
-      version = "~> 2.0"
+      version = "~> 3.0"
     }
   }
 }
@@ -107,8 +136,8 @@ Download the appropriate binary for your platform from the releases page and pla
 
 ```bash
 # Example for macOS ARM64
-mkdir -p ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/2.0.0/darwin_arm64
-cp terraform-provider-komodo ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/2.0.0/darwin_arm64/
+mkdir -p ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/3.0.0/darwin_arm64
+cp terraform-provider-komodo ~/.terraform.d/plugins/registry.terraform.io/johnciavarella/komodo/3.0.0/darwin_arm64/
 ```
 
 ## Authentication
@@ -122,7 +151,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "registry.terraform.io/johnciavarella/komodo"
-      version = "2.0.0"
+      version = "3.0.0"
     }
   }
 }
@@ -150,7 +179,7 @@ export KOMODO_API_SECRET="S-your-api-secret"
 
 ## Tags
 
-The `tags` attribute is available on `komodo_server`, `komodo_stack`, `komodo_deployment`, `komodo_build`, `komodo_builder`, and `komodo_repo`. Tags are Komodo label objects (managed with `komodo_tag`) and let you group and filter resources in the Komodo UI.
+The `tags` attribute is available on `komodo_server`, `komodo_stack`, `komodo_deployment`, `komodo_build`, `komodo_builder`, `komodo_repo`, `komodo_alerter`, and `komodo_procedure`. Tags are Komodo label objects (managed with `komodo_tag`) and let you group and filter resources in the Komodo UI.
 
 ```hcl
 resource "komodo_tag" "env_prod" {
@@ -294,6 +323,10 @@ resource "komodo_server" "prod" {
 | `mem_critical` | `number` | No | `95` | Memory critical threshold (%) |
 | `disk_warning` | `number` | No | `75` | Disk warning threshold (%) |
 | `disk_critical` | `number` | No | `95` | Disk critical threshold (%) |
+| `send_version_mismatch_alerts` | `bool` | No | Komodo default (`true`) | Send alerts when the server's Periphery version does not match Core |
+| `maintenance_windows` | `list(object)` | No | `null` | Windows during which alerts about this server are suppressed. Each has `name`, `duration_minutes`, and optional `description`, `schedule_type` (`Daily`, `Weekly`, `OneTime`), `day_of_week`, `date`, `hour`, `minute`, `timezone`, `enabled`. `null` = unmanaged; `[]` = remove all. |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
 | `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
 
 ### komodo_stack
@@ -386,7 +419,8 @@ resource "komodo_stack" "on_host" {
 | `run_directory` | `string` | No | `""` | Directory to `cd` into before `docker compose` |
 | `env_file_path` | `string` | No | `".env"` | Env file written before `compose up` |
 | `environment` | `string` | No | `""` | Newline-separated `KEY=VALUE` pairs written to the env file |
-| `additional_env_files` | `list(string)` | No | `null` | Additional env files via `--env-file` |
+| `additional_env_files` | `list(object)` | No | `null` | Additional env files via `--env-file`. Each has `path` and optional `track` (default `true`). |
+| `config_files` | `list(object)` | No | `null` | Extra files Komodo tracks; a change counts in `DeployStackIfChanged`. Each has `path`, optional `services`, and `requires` (`Redeploy`, `Restart` or `None`). `null` = unmanaged; `[]` = clear. |
 | `webhook_enabled` | `bool` | No | `false` | Allow incoming webhooks to trigger actions |
 | `webhook_secret` | `string` | No | `""` | Custom webhook secret (sensitive) |
 | `webhook_force_deploy` | `bool` | No | `false` | Always deploy on webhook without diffing |
@@ -400,6 +434,9 @@ resource "komodo_stack" "on_host" {
 | `send_alerts` | `bool` | No | `false` | Send StackStateChange alerts |
 | `deployed` | `bool` | No | `false` | Triggers `DeployStack` (git pull + `compose up`) on create/update. Runs before `started`. |
 | `started` | `bool` | No | `false` | When `true`, runs `compose up`. When `false`, runs `compose down`. Skipped if `deployed = true`. |
+| `auto_update_skip_services` | `list(string)` | No | `null` | Services left out of the global auto-update. `null` = unmanaged; `[]` = clear. |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
 | `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
 
 ### komodo_deployment
@@ -471,6 +508,10 @@ resource "komodo_deployment" "api" {
 | `auto_update` | `bool` | No | `false` | Redeploy automatically when newer images are found |
 | `deployed` | `bool` | No | `false` | Triggers `Deploy` (pull + `docker run`) on create/update. Runs before `started`. |
 | `started` | `bool` | No | `false` | When `true`, runs `Deploy`. When `false`, runs `DestroyDeployment` (stop + rm). Skipped if `deployed = true`. |
+| `custom_name` | `string` | No | `""` | Container (or swarm service) name, if different from the deployment name. Must be a valid container name. |
+| `redeploy_on_build` | `bool` | No | `false` | Redeploy whenever the attached Komodo build finishes (`image_type = "Build"`) |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
 | `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
 
 ### komodo_build
@@ -521,6 +562,11 @@ resource "komodo_build" "api" {
 | `labels` | `string` | No | `""` | Newline-separated `KEY=VALUE` image labels |
 | `webhook_enabled` | `bool` | No | `false` | Allow incoming webhooks to trigger builds |
 | `files_on_host` | `bool` | No | `false` | Source Dockerfile from the server filesystem |
+| `secret_args` | `string` | No | `""` | Newline-separated `KEY=VALUE` secret build arguments, passed with docker secret mounts (sensitive) |
+| `extra_args` | `list(string)` | No | `null` | Extra docker CLI arguments for the build command. `null` = unmanaged; `[]` = clear. |
+| `version` | `string` | No | Komodo's current version | Build version as `major.minor.patch`. Komodo bumps the patch on every build while `auto_increment_version` is `true`, so set this together with `auto_increment_version = false`. |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
 | `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
 
 ### komodo_builder
@@ -541,7 +587,9 @@ resource "komodo_builder" "build_server" {
 | Attribute | Type | Required | Default | Description |
 | --------- | ---- | -------- | ------- | ----------- |
 | `name` | `string` | Yes | - | Display name of the builder |
-| `server_id` | `string` | No | `""` | Server to use as builder. Use `komodo_server.<name>.id`. Omit for Local. |
+| `server_id` | `string` | No | `""` | Server to use as builder. Use `komodo_server.<name>.id`. Omit for Local. If the builder has several servers in Komodo, this is the first; changing it replaces the whole list with the one server. |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
 | `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
 
 ### komodo_repo
@@ -578,6 +626,8 @@ resource "komodo_repo" "app_source" {
 | `on_clone` | `string` | No | `""` | Command to run after initial clone |
 | `on_pull` | `string` | No | `""` | Command to run after each pull |
 | `webhook_enabled` | `bool` | No | `false` | Enable webhooks |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
 | `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
 
 ### komodo_tag
@@ -719,8 +769,148 @@ output "ci_bot_api_secret" {
 | --------- | ---- | -------- | ------- | ----------- |
 | `user_id` | `string` | Yes | - | ID of the service user. Changing this forces a new resource. |
 | `name` | `string` | Yes | - | Name for the API key. Changing this forces a new resource. |
+| `expires` | `number` | No | `0` | Unix timestamp in milliseconds when the key expires. `0` = never. Changing this forces a new resource. |
 | `key` | `string` | Computed | - | The API key (`K-...`). Sensitive. |
 | `secret` | `string` | Computed | - | The API secret (`S-...`). Only available at creation time. Sensitive. |
+
+### komodo_variable
+
+Manages a Komodo global variable. Reference it as `[[NAME]]` in the environment, build args and other interpolated fields of stacks, deployments, builds and repos. Requires an admin API key.
+
+```hcl
+resource "komodo_variable" "docker_root" {
+  name        = "DOCKER_ROOT"
+  value       = "/opt/docker"
+  description = "Base directory for stack data"
+}
+
+# A secret variable: hidden in Komodo's updates and logs.
+resource "komodo_variable" "db_password" {
+  name      = "POSTGRES_PASSWORD"
+  value     = var.postgres_password
+  is_secret = true
+}
+
+resource "komodo_stack" "app" {
+  name = "app"
+  repo = "myorg/app"
+
+  environment = <<-EOT
+    DATA_DIR=[[DOCKER_ROOT]]/app
+    POSTGRES_PASSWORD=[[POSTGRES_PASSWORD]]
+  EOT
+
+  # Variables are resolved by name at deploy time, so make the dependency explicit.
+  depends_on = [komodo_variable.docker_root, komodo_variable.db_password]
+}
+```
+
+#### Attributes
+
+| Attribute | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `name` | `string` | Yes | - | Variable name, as used in `[[NAME]]`. Letters, digits and underscores only, not starting with a digit. Changing this forces a new resource. |
+| `value` | `string` | No | `""` | Variable value, up to 10000 characters. Always sensitive in Terraform. Komodo stores it unencrypted. |
+| `description` | `string` | No | `""` | Description shown in the Komodo UI |
+| `is_secret` | `bool` | No | `false` | Hide the value in Komodo's updates and logs, and from non-admin users |
+
+Variables have no separate ID; `id` is the name, and import is by name.
+
+### komodo_alerter
+
+Manages a Komodo alerter, which routes alerts (server unreachable, container state changes, failed builds, ...) to Slack, Discord, ntfy, Pushover or a custom HTTP endpoint.
+
+```hcl
+# Send every alert to a Discord channel.
+resource "komodo_alerter" "discord" {
+  name = "discord"
+  endpoint = {
+    type = "Discord"
+    url  = var.discord_webhook_url
+  }
+}
+
+# Send only server and stack problems to ntfy, and leave one noisy stack out.
+resource "komodo_alerter" "ntfy_critical" {
+  name = "ntfy-critical"
+  endpoint = {
+    type  = "Ntfy"
+    url   = "https://ntfy.example.com/komodo"
+    email = "ops@example.com"
+  }
+
+  alert_types      = ["ServerUnreachable", "ServerDisk", "StackStateChange", "BuildFailed"]
+  except_resources = [{ type = "Stack", id = komodo_stack.scratch.id }]
+}
+```
+
+#### Attributes
+
+| Attribute | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `name` | `string` | Yes | - | Display name |
+| `endpoint` | `object` | Yes | - | Where alerts are sent: `type` (`Custom`, `Slack`, `Discord`, `Ntfy`, `Pushover`), `url` (sensitive), and for Ntfy an optional `email` |
+| `enabled` | `bool` | No | `true` | Whether the alerter sends alerts. Komodo's own default for a new alerter is `false`. |
+| `alert_types` | `list(string)` | No | `null` | Only send these alert types. Empty or unset sends all. See the [resource page](docs/resources/alerter.md) for the valid values. |
+| `resources` | `list(object)` | No | `null` | Only send alerts about these resources. Each has `type` and `id` (a Komodo ID). |
+| `except_resources` | `list(object)` | No | `null` | Never send alerts about these resources |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
+| `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
+
+An alerter's own maintenance windows are not managed by this resource and are left as they are.
+
+### komodo_procedure
+
+Manages a Komodo procedure: an ordered list of stages, each running one or more executions in parallel. A procedure can run on a schedule, from a webhook, or on demand.
+
+```hcl
+resource "komodo_procedure" "nightly_deploy" {
+  name              = "nightly-deploy"
+  schedule_format   = "Cron"
+  schedule          = "0 0 2 * * ?" # seconds minutes hours day month weekday
+  schedule_timezone = "America/New_York"
+  schedule_alert    = false # only alert on failure
+
+  stages = [
+    {
+      name = "Pull config"
+      executions = [{
+        type   = "PullRepo"
+        params = jsonencode({ repo = komodo_repo.config.id })
+      }]
+    },
+    {
+      name = "Deploy changed stacks"
+      # Executions in one stage run in parallel.
+      executions = [
+        { type = "DeployStackIfChanged", params = jsonencode({ stack = komodo_stack.app.id }) },
+        { type = "BatchDeployStackIfChanged", params = jsonencode({ pattern = "media-*" }) },
+      ]
+    },
+  ]
+}
+```
+
+#### Attributes
+
+| Attribute | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `name` | `string` | Yes | - | Display name |
+| `stages` | `list(object)` | No | `null` | Stages, run in order. Each has `name`, optional `enabled` (default `true`), and `executions`: a list of `type`, optional `params` (a JSON object as a string, default `"{}"`), and optional `enabled` (default `true`). |
+| `schedule_format` | `string` | No | `"English"` | How `schedule` is written: `English` (e.g. `"every day at 3am"`) or `Cron` |
+| `schedule` | `string` | No | `""` | When to run. Cron uses six fields with seconds first. Empty = no schedule. |
+| `schedule_enabled` | `bool` | No | `true` | Whether the schedule is active when one is set |
+| `schedule_timezone` | `string` | No | `""` | TZ identifier. Empty uses Komodo Core's timezone. |
+| `schedule_alert` | `bool` | No | `true` | Send an alert each time the schedule runs |
+| `failure_alert` | `bool` | No | `true` | Send an alert when the procedure fails |
+| `webhook_enabled` | `bool` | No | `true` | Whether incoming webhooks trigger the procedure |
+| `webhook_secret` | `string` | No | `""` | Alternate webhook secret (sensitive) |
+| `description` | `string` | No | `null` | Description shown in the Komodo UI. `null` = unmanaged; `""` = clear. |
+| `template` | `bool` | No | `null` | Mark the resource as a template in Komodo. `null` = unmanaged. |
+| `tags` | `list(string)` | No | `null` | Tag names to apply. `null` = unmanaged; `[]` = clear all tags. |
+
+Komodo rewrites execution `params` when it saves a procedure: it fills in defaults and replaces resource names with IDs. The provider does not show those rewrites as changes. After `terraform import`, the stages show a one-time difference from your config until the first apply.
 
 ## Data Sources
 
@@ -736,7 +926,9 @@ output "server_address" {
 }
 ```
 
-Available data sources: `komodo_server`, `komodo_stack`, `komodo_deployment`, `komodo_build`, `komodo_builder`, `komodo_repo`, `komodo_tag`, `komodo_docker_registry_account`.
+Available data sources: `komodo_server`, `komodo_stack`, `komodo_deployment`, `komodo_build`, `komodo_builder`, `komodo_repo`, `komodo_tag`, `komodo_docker_registry_account`, `komodo_variable`, `komodo_alerter`, `komodo_procedure`.
+
+`komodo_variable` is looked up by `name`. `komodo_alerter` does not expose the endpoint URL, since it usually embeds a token.
 
 The `komodo_docker_registry_account` data source returns `id`, `domain`, and `username` (token is not exposed):
 
@@ -759,7 +951,7 @@ terraform {
   required_providers {
     komodo = {
       source  = "registry.terraform.io/johnciavarella/komodo"
-      version = "2.0.0"
+      version = "3.0.0"
     }
   }
 }
@@ -866,13 +1058,16 @@ resource "komodo_deployment" "api" {
 
 ## Import
 
-All resources support `terraform import` by their Komodo ID:
+All resources support `terraform import` by their Komodo ID, except `komodo_variable`, which is imported by name:
 
 ```bash
 terraform import komodo_server.prod                   66113df3abe32960b87018dd
 terraform import komodo_stack.web                     67076689ed600cfdd52ac637
 terraform import komodo_deployment.api                67a1b2c3d4e5f6a7b8c9d0e1
 terraform import komodo_docker_registry_account.ghcr  66113df3abe32960b87018de
+terraform import komodo_alerter.discord               67b2c3d4e5f6a7b8c9d0e1f2
+terraform import komodo_procedure.nightly_deploy      67c3d4e5f6a7b8c9d0e1f2a3
+terraform import komodo_variable.docker_root          DOCKER_ROOT
 ```
 
 ## Development
@@ -889,7 +1084,9 @@ make install
 ### Running Tests
 
 ```bash
-# Unit tests
+# Unit and lifecycle tests. The lifecycle tests run Terraform against an
+# in-memory fake of the Komodo API, so they need the `terraform` CLI on PATH
+# (they are skipped without it) but no Komodo instance.
 make test
 
 # Acceptance tests (requires a live Komodo instance)
