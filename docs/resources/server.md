@@ -50,6 +50,7 @@ resource "komodo_server" "web_01" {
 - `ignore_mounts` (List of String) Mount paths excluded from disk-stats reporting.
 - `insecure_tls` (Boolean) Skip TLS certificate validation when Core connects to Periphery. Defaults to true because Periphery typically presents a self-signed cert.
 - `links` (List of String) Quick links displayed in the Komodo UI for this server.
+- `maintenance_windows` (Attributes List) Scheduled windows during which alerts about this server are suppressed. Leave it out and Terraform does not manage the windows: whatever is set in the Komodo UI stays, and is not read into state. Set it to [] to remove all windows. (see [below for nested schema](#nestedatt--maintenance_windows))
 - `mem_critical` (Number) Memory critical threshold percentage.
 - `mem_warning` (Number) Memory warning threshold percentage.
 - `passkey` (String, Sensitive, Deprecated) Deprecated: replaced by Komodo's automatic PKI key rotation in v2. Retained for backwards compatibility only; use periphery_public_key instead.
@@ -66,6 +67,25 @@ resource "komodo_server" "web_01" {
 ### Read-Only
 
 - `id` (String) Unique identifier of the server.
+
+<a id="nestedatt--maintenance_windows"></a>
+### Nested Schema for `maintenance_windows`
+
+Required:
+
+- `duration_minutes` (Number) Length of the window in minutes.
+- `name` (String) Name of the window.
+
+Optional:
+
+- `date` (String) For OneTime windows: the date as YYYY-MM-DD.
+- `day_of_week` (String) For Weekly windows: the day, for example "Monday".
+- `description` (String) What the window is for.
+- `enabled` (Boolean) Whether the window is active.
+- `hour` (Number) Start hour, 0-23.
+- `minute` (Number) Start minute, 0-59.
+- `schedule_type` (String) "Daily" (default), "Weekly" or "OneTime".
+- `timezone` (String) TZ identifier, for example "America/New_York". Empty uses Komodo Core's timezone.
 
 ## Import
 

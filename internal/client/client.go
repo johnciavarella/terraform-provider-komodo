@@ -182,6 +182,21 @@ type Resource struct {
 
 // ---- Server ----
 
+// MaintenanceWindow is a scheduled period during which alerts are suppressed.
+// ScheduleType is "Daily", "Weekly" or "OneTime".
+type MaintenanceWindow struct {
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	ScheduleType    string `json:"schedule_type"`
+	DayOfWeek       string `json:"day_of_week"`
+	Date            string `json:"date"`
+	Hour            int    `json:"hour"`
+	Minute          int    `json:"minute"`
+	DurationMinutes int    `json:"duration_minutes"`
+	Timezone        string `json:"timezone"`
+	Enabled         bool   `json:"enabled"`
+}
+
 type ServerConfig struct {
 	Address                   string   `json:"address,omitempty"`
 	ExternalAddress           string   `json:"external_address,omitempty"`
@@ -199,12 +214,14 @@ type ServerConfig struct {
 	SendMemAlerts             *bool    `json:"send_mem_alerts,omitempty"`
 	SendDiskAlerts            *bool    `json:"send_disk_alerts,omitempty"`
 	SendVersionMismatchAlerts *bool    `json:"send_version_mismatch_alerts,omitempty"`
-	CPUWarning                *float64 `json:"cpu_warning,omitempty"`
-	CPUCritical               *float64 `json:"cpu_critical,omitempty"`
-	MemWarning                *float64 `json:"mem_warning,omitempty"`
-	MemCritical               *float64 `json:"mem_critical,omitempty"`
-	DiskWarning               *float64 `json:"disk_warning,omitempty"`
-	DiskCritical              *float64 `json:"disk_critical,omitempty"`
+	// Pointer to a slice: nil leaves the windows alone, empty clears them.
+	MaintenanceWindows *[]MaintenanceWindow `json:"maintenance_windows,omitempty"`
+	CPUWarning         *float64             `json:"cpu_warning,omitempty"`
+	CPUCritical        *float64             `json:"cpu_critical,omitempty"`
+	MemWarning         *float64             `json:"mem_warning,omitempty"`
+	MemCritical        *float64             `json:"mem_critical,omitempty"`
+	DiskWarning        *float64             `json:"disk_warning,omitempty"`
+	DiskCritical       *float64             `json:"disk_critical,omitempty"`
 }
 
 type Server struct {
