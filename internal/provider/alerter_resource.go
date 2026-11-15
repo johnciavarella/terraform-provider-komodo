@@ -64,6 +64,8 @@ type AlerterResourceModel struct {
 	Resources       []resourceTargetModel `tfsdk:"resources"`
 	ExceptResources []resourceTargetModel `tfsdk:"except_resources"`
 	Tags            types.List            `tfsdk:"tags"`
+	Description     types.String          `tfsdk:"description"`
+	Template        types.Bool            `tfsdk:"template"`
 }
 
 func NewAlerterResource() resource.Resource {
@@ -118,6 +120,8 @@ func (r *AlerterResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"resources":        resourceTargetListAttribute("Only send alerts about these resources. Empty or unset sends alerts for all resources."),
 			"except_resources": resourceTargetListAttribute("Never send alerts about these resources."),
+			"description":      metaDescriptionAttribute(),
+			"template":         metaTemplateAttribute(),
 			"tags":             schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this alerter."},
 		},
 	}
@@ -138,6 +142,8 @@ func (r *AlerterResource) Configure(_ context.Context, req resource.ConfigureReq
 // ValidateConfig checks enum values at plan time, where Komodo would
 // otherwise reject them with a deserialization error during apply.
 func (r *AlerterResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	validateResourceName(ctx, req.Config, &resp.Diagnostics)
+
 	// Each attribute is read on its own and skipped while unknown, so values
 	// that are only known after apply do not fail validation.
 	known := func(v types.String) bool { return !v.IsNull() && !v.IsUnknown() }
@@ -281,6 +287,7 @@ func (r *AlerterResource) Create(ctx context.Context, req resource.CreateRequest
 	tagsFromPlan := plan.Tags
 	mapAlerterToModel(ctx, r.client, alerter, &plan)
 	applyResourceTags(ctx, r.client, "Alerter", alerter.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Alerter", alerter.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -306,6 +313,7 @@ func (r *AlerterResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 
 	mapAlerterToModel(ctx, r.client, alerter, &state)
+	readResourceMeta(ctx, r.client, "Alerter", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -334,6 +342,7 @@ func (r *AlerterResource) Update(ctx context.Context, req resource.UpdateRequest
 	tagsFromPlan := plan.Tags
 	mapAlerterToModel(ctx, r.client, alerter, &plan)
 	applyResourceTags(ctx, r.client, "Alerter", id, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Alerter", id, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

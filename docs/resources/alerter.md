@@ -67,10 +67,12 @@ resource "komodo_alerter" "custom" {
 ### Optional
 
 - `alert_types` (List of String) Only send these alert types. Empty or unset sends all types. Valid values: Test, SwarmUnhealthy, ServerUnreachable, ServerCpu, ServerMem, ServerDisk, ServerVersionMismatch, ContainerStateChange, DeploymentImageUpdateAvailable, DeploymentAutoUpdated, StackStateChange, StackImageUpdateAvailable, StackAutoUpdated, AwsBuilderTerminationFailed, ResourceSyncPendingUpdates, BuildFailed, RepoBuildFailed, ProcedureFailed, ActionFailed, ScheduleRun, Custom.
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `enabled` (Boolean) Whether the alerter sends alerts. Defaults to true (Komodo's own default for a new alerter is false).
 - `except_resources` (Attributes List) Never send alerts about these resources. (see [below for nested schema](#nestedatt--except_resources))
 - `resources` (Attributes List) Only send alerts about these resources. Empty or unset sends alerts for all resources. (see [below for nested schema](#nestedatt--resources))
 - `tags` (List of String) List of tag names to apply to this alerter.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 
 ### Read-Only
 

@@ -2,7 +2,10 @@ package provider
 
 import (
 	"context"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"os"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -273,6 +276,24 @@ func readResourceMeta(ctx context.Context, c *client.Client, targetType, id stri
 	}
 	if !template.IsNull() {
 		*template = types.BoolValue(meta.Template)
+	}
+}
+
+// validateResourceName rejects names Komodo would rewrite on save. Komodo
+// trims the name and replaces newlines, so such a name would come back
+// different from the configured one and fail the apply.
+func validateResourceName(ctx context.Context, config tfsdk.Config, diags *diag.Diagnostics) {
+	var name types.String
+	diags.Append(config.GetAttribute(ctx, path.Root("name"), &name)...)
+	if name.IsNull() || name.IsUnknown() {
+		return
+	}
+	v := name.ValueString()
+	switch {
+	case strings.TrimSpace(v) == "":
+		diags.AddAttributeError(path.Root("name"), "Invalid name", "name must not be empty.")
+	case v != strings.TrimSpace(v) || strings.ContainsAny(v, "\r\n"):
+		diags.AddAttributeError(path.Root("name"), "Invalid name", "name must not start or end with whitespace or contain line breaks.")
 	}
 }
 
