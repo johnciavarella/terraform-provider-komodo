@@ -222,7 +222,8 @@ resource "komodo_repo" "test" {
 }
 
 func TestAccVariableResource_basic(t *testing.T) {
-	rName := acctest.RandomWithPrefix("TF_ACC_TEST")
+	// Variable names allow letters, digits and underscores only.
+	rName := "TF_ACC_TEST_" + acctest.RandString(8)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,

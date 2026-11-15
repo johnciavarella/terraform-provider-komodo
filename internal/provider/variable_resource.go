@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,8 +20,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &VariableResource{}
-	_ resource.ResourceWithImportState = &VariableResource{}
+	_ resource.Resource                   = &VariableResource{}
+	_ resource.ResourceWithImportState    = &VariableResource{}
+	_ resource.ResourceWithValidateConfig = &VariableResource{}
 )
 
 type VariableResource struct {
@@ -70,6 +73,31 @@ func (r *VariableResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "Mark the variable as a secret: Komodo hides its value in updates and logs, and from non-admin users.",
 			},
 		},
+	}
+}
+
+// Komodo's own limits for variables.
+var variableNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+const (
+	maxVariableNameLength  = 500
+	maxVariableValueLength = 10000
+)
+
+func (r *VariableResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var name, value types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("name"), &name)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("value"), &value)...)
+	if !name.IsNull() && !name.IsUnknown() {
+		if n := name.ValueString(); !variableNamePattern.MatchString(n) || len(n) > maxVariableNameLength {
+			resp.Diagnostics.AddAttributeError(path.Root("name"), "Invalid variable name",
+				fmt.Sprintf("%q is not a valid variable name. It must start with a letter or underscore, contain only letters, digits and underscores, and be at most %d characters.", n, maxVariableNameLength))
+		}
+	}
+	if !value.IsNull() && !value.IsUnknown() && utf8.RuneCountInString(value.ValueString()) > maxVariableValueLength {
+		// The value itself is not echoed: it may be a secret.
+		resp.Diagnostics.AddAttributeError(path.Root("value"), "Variable value too long",
+			fmt.Sprintf("Komodo limits variable values to %d characters.", maxVariableValueLength))
 	}
 }
 
