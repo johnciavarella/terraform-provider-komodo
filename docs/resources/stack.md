@@ -47,12 +47,14 @@ resource "komodo_stack" "web" {
 - `auto_pull` (Boolean) Whether to automatically compose pull before redeploying.
 - `auto_update` (Boolean) Whether to automatically redeploy when newer images are found.
 - `auto_update_all_services` (Boolean) Whether auto-update redeploys every service (true) or only services with updated images (false).
+- `auto_update_skip_services` (List of String) Services left out of the global auto-update. Manual update checks still include them. Leave it out and Terraform does not manage the list; set it to [] to clear it.
 - `branch` (String) Branch of the repo.
 - `build_extra_args` (List of String) Extra arguments passed after docker compose build.
 - `clone_path` (String) Custom path on the server / builder to clone the repo into.
 - `commit` (String) Specific commit hash.
 - `compose_cmd_wrapper` (String) Optional command wrapper invoked before docker compose (e.g. "docker buildx bake" or a custom script).
 - `compose_cmd_wrapper_include` (List of String) Compose subcommands to wrap with compose_cmd_wrapper (e.g. ["up", "build"]).
+- `config_files` (Attributes List) Extra files, besides the compose and env files, that Komodo tracks for this stack. A change to one counts as a change in DeployStackIfChanged. Env files passed with --env-file belong in additional_env_files instead. Leave it out and Terraform does not manage the list; set it to [] to clear it. (see [below for nested schema](#nestedatt--config_files))
 - `deployed` (Boolean) When true, triggers a full DeployStack (git pull + compose up) after create/update. Use this to redeploy on config changes. Like started, this is intent-based and async.
 - `destroy_before_deploy` (Boolean) Whether to run docker compose down before compose up.
 - `env_file_path` (String) Name of the environment file written before docker compose up.
@@ -103,6 +105,19 @@ Required:
 Optional:
 
 - `track` (Boolean) Whether Komodo reads/displays/validates the file. If false, the file is only passed via --env-file.
+
+
+<a id="nestedatt--config_files"></a>
+### Nested Schema for `config_files`
+
+Required:
+
+- `path` (String) Path of the file, relative to run_directory.
+
+Optional:
+
+- `requires` (String) What a change to the file requires: "Redeploy", "Restart" or "None" (the default: track the file but take no action).
+- `services` (List of String) Services that depend on the file. Empty means all services.
 
 ## Import
 

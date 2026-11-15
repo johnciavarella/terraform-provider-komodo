@@ -348,6 +348,15 @@ func (a *AdditionalEnvFile) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// StackFileDependency is an extra file Komodo tracks for a stack. A change to
+// it counts as a stack change in DeployStackIfChanged. Requires is one of
+// "Redeploy", "Restart" or "None"; Komodo omits it when it is "None".
+type StackFileDependency struct {
+	Path     string   `json:"path"`
+	Services []string `json:"services,omitempty"`
+	Requires string   `json:"requires,omitempty"`
+}
+
 type StackConfig struct {
 	ServerID                 string              `json:"server_id,omitempty"`
 	SwarmID                  string              `json:"swarm_id,omitempty"`
@@ -388,7 +397,10 @@ type StackConfig struct {
 	ComposeCmdWrapper        string              `json:"compose_cmd_wrapper,omitempty"`
 	ComposeCmdWrapperInclude []string            `json:"compose_cmd_wrapper_include,omitempty"`
 	IgnoreServices           []string            `json:"ignore_services,omitempty"`
-	SendAlerts               *bool               `json:"send_alerts,omitempty"`
+	// Pointers to slices: nil leaves the field alone, an empty slice clears it.
+	AutoUpdateSkipServices *[]string              `json:"auto_update_skip_services,omitempty"`
+	ConfigFiles            *[]StackFileDependency `json:"config_files,omitempty"`
+	SendAlerts             *bool                  `json:"send_alerts,omitempty"`
 }
 
 type Stack struct {
