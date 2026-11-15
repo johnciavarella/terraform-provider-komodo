@@ -290,6 +290,7 @@ func (p *KomodoProvider) Resources(_ context.Context) []func() resource.Resource
 		NewGitProviderAccountResource,
 		NewDockerRegistryAccountResource,
 		NewOnboardingKeyResource,
+		NewVariableResource,
 	}
 }
 
@@ -303,5 +304,6 @@ func (p *KomodoProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewTagDataSource,
 		NewBuilderDataSource,
 		NewDockerRegistryAccountDataSource,
+		NewVariableDataSource,
 	}
 }

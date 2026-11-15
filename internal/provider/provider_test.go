@@ -220,3 +220,45 @@ resource "komodo_repo" "test" {
 }
 `, name)
 }
+
+func TestAccVariableResource_basic(t *testing.T) {
+	rName := acctest.RandomWithPrefix("TF_ACC_TEST")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccVariableResourceConfig(rName, "first", false),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("komodo_variable.test", "id", rName),
+					resource.TestCheckResourceAttr("komodo_variable.test", "name", rName),
+					resource.TestCheckResourceAttr("komodo_variable.test", "value", "first"),
+					resource.TestCheckResourceAttr("komodo_variable.test", "is_secret", "false"),
+				),
+			},
+			{
+				Config: testAccVariableResourceConfig(rName, "second", true),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("komodo_variable.test", "value", "second"),
+					resource.TestCheckResourceAttr("komodo_variable.test", "is_secret", "true"),
+				),
+			},
+			{
+				ResourceName:      "komodo_variable.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func testAccVariableResourceConfig(name, value string, secret bool) string {
+	return fmt.Sprintf(`
+resource "komodo_variable" "test" {
+  name        = %[1]q
+  value       = %[2]q
+  description = "terraform acceptance test"
+  is_secret   = %[3]t
+}
+`, name, value, secret)
+}

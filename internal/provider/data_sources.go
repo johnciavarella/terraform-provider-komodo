@@ -654,3 +654,67 @@ func (d *DockerRegistryAccountDataSource) Read(ctx context.Context, req datasour
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
+
+// ---- Variable data source ----
+
+var _ datasource.DataSource = &VariableDataSource{}
+
+type VariableDataSource struct{ client *client.Client }
+
+type VariableDataSourceModel struct {
+	Name        types.String `tfsdk:"name"`
+	Value       types.String `tfsdk:"value"`
+	Description types.String `tfsdk:"description"`
+	IsSecret    types.Bool   `tfsdk:"is_secret"`
+}
+
+func NewVariableDataSource() datasource.DataSource { return &VariableDataSource{} }
+
+func (d *VariableDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_variable"
+}
+
+func (d *VariableDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetches a Komodo global variable by name.",
+		Attributes: map[string]schema.Attribute{
+			"name":        schema.StringAttribute{Required: true, Description: "Variable name."},
+			"value":       schema.StringAttribute{Computed: true, Sensitive: true, Description: "Variable value. For a secret variable read with a non-admin API key, Komodo returns a mask of '#' characters instead of the value."},
+			"description": schema.StringAttribute{Computed: true, Description: "Description shown in the Komodo UI."},
+			"is_secret":   schema.BoolAttribute{Computed: true, Description: "Whether the variable is marked as a secret."},
+		},
+	}
+}
+
+func (d *VariableDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *client.Client, got: %T", req.ProviderData))
+		return
+	}
+	d.client = c
+}
+
+func (d *VariableDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config VariableDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	v, err := d.client.GetVariable(ctx, config.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading variable", err.Error())
+		return
+	}
+
+	config.Name = types.StringValue(v.Name)
+	config.Value = types.StringValue(v.Value)
+	config.Description = types.StringValue(v.Description)
+	config.IsSecret = types.BoolValue(v.IsSecret)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}

@@ -1410,3 +1410,64 @@ func IntPtr(i int) *int {
 func StringPtr(s string) *string {
 	return &s
 }
+
+// ---- Variable ----
+
+// Variable is a global key/value that Komodo interpolates wherever
+// `[[NAME]]` appears in resource config. Variables are keyed by name and have
+// no separate ID.
+type Variable struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Value       string `json:"value"`
+	IsSecret    bool   `json:"is_secret"`
+}
+
+func (c *Client) CreateVariable(ctx context.Context, v Variable) (*Variable, error) {
+	var out Variable
+	err := c.Write(ctx, "CreateVariable", map[string]interface{}{
+		"name":        v.Name,
+		"value":       v.Value,
+		"description": v.Description,
+		"is_secret":   v.IsSecret,
+	}, &out)
+	return &out, err
+}
+
+func (c *Client) ListVariables(ctx context.Context) ([]Variable, error) {
+	var vars []Variable
+	err := c.Read(ctx, "ListVariables", struct{}{}, &vars)
+	return vars, err
+}
+
+// GetVariable looks the variable up in ListVariables rather than calling
+// GetVariable: Komodo answers a missing variable with a generic HTTP 500,
+// which cannot be told apart from a real server error (and would be retried).
+func (c *Client) GetVariable(ctx context.Context, name string) (*Variable, error) {
+	vars, err := c.ListVariables(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range vars {
+		if vars[i].Name == name {
+			return &vars[i], nil
+		}
+	}
+	return nil, &NotFoundError{Message: fmt.Sprintf("variable not found: %s", name)}
+}
+
+func (c *Client) UpdateVariableValue(ctx context.Context, name, value string) error {
+	return c.Write(ctx, "UpdateVariableValue", map[string]string{"name": name, "value": value}, nil)
+}
+
+func (c *Client) UpdateVariableDescription(ctx context.Context, name, description string) error {
+	return c.Write(ctx, "UpdateVariableDescription", map[string]string{"name": name, "description": description}, nil)
+}
+
+func (c *Client) UpdateVariableIsSecret(ctx context.Context, name string, isSecret bool) error {
+	return c.Write(ctx, "UpdateVariableIsSecret", map[string]interface{}{"name": name, "is_secret": isSecret}, nil)
+}
+
+func (c *Client) DeleteVariable(ctx context.Context, name string) error {
+	return c.Write(ctx, "DeleteVariable", map[string]string{"name": name}, nil)
+}
