@@ -349,3 +349,79 @@ func TestProcedureValidation(t *testing.T) {
 		t.Errorf("invalid configs reached the API: %v", f.requests)
 	}
 }
+
+func TestNewResourceNameValidation(t *testing.T) {
+	requireTerraform(t)
+	f, srv := newFakeKomodo(t)
+	endpoint := "\n  endpoint = { type = \"Slack\", url = \"u\" }"
+	cases := map[string]struct{ config, wantErr string }{
+		"variable hyphen":         {`resource "komodo_variable" "v" { name = "MY-VAR" }`, `Invalid variable name`},
+		"variable leading digit":  {`resource "komodo_variable" "v" { name = "1VAR" }`, `Invalid variable name`},
+		"variable empty":          {`resource "komodo_variable" "v" { name = "" }`, `Invalid variable name`},
+		"variable long value":     {"resource \"komodo_variable\" \"v\" {\n  name  = \"V\"\n  value = \"" + strings.Repeat("x", 10001) + "\"\n}", `Variable value too long`},
+		"alerter trailing space":  {"resource \"komodo_alerter\" \"a\" {\n  name = \"alerts \"" + endpoint + "\n}", `Invalid name`},
+		"alerter empty":           {"resource \"komodo_alerter\" \"a\" {\n  name = \"\"" + endpoint + "\n}", `Invalid name`},
+		"procedure leading space": {`resource "komodo_procedure" "p" { name = " nightly" }`, `Invalid name`},
+		"procedure newline":       {`resource "komodo_procedure" "p" { name = "night\nly" }`, `Invalid name`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{{
+					Config:      f.providerConfig(srv.URL) + c.config,
+					ExpectError: regexp.MustCompile(c.wantErr),
+				}},
+			})
+		})
+	}
+	if len(f.requests) != 0 {
+		t.Errorf("invalid configs reached the API: %v", f.requests)
+	}
+}
+
+// Names with inner spaces and a value of exactly the limit are valid.
+func TestNewResourceBoundaryValues(t *testing.T) {
+	requireTerraform(t)
+	f, srv := newFakeKomodo(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             f.checkEmpty(t),
+		Steps: []resource.TestStep{{
+			Config: f.providerConfig(srv.URL) + `
+resource "komodo_variable" "v" {
+  name  = "_a1"
+  value = "` + strings.Repeat("x", 10000) + `"
+}
+resource "komodo_alerter" "a" {
+  name        = "team alerts (prod)"
+  description = "pages the on-call"
+  endpoint    = { type = "Ntfy", url = "u", email = "" }
+}
+resource "komodo_procedure" "p" {
+  name     = "Nightly Deploy"
+  template = true
+}`,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("komodo_alerter.a", "name", "team alerts (prod)"),
+				resource.TestCheckResourceAttr("komodo_alerter.a", "description", "pages the on-call"),
+				resource.TestCheckResourceAttr("komodo_alerter.a", "endpoint.email", ""),
+				resource.TestCheckNoResourceAttr("komodo_alerter.a", "template"),
+				resource.TestCheckResourceAttr("komodo_procedure.p", "template", "true"),
+				f.check(func() error {
+					for _, a := range f.resources["Alerter"] {
+						if a["description"] != "pages the on-call" || a["template"] != nil {
+							return fmt.Errorf("alerter meta in Komodo: %v %v", a["description"], a["template"])
+						}
+					}
+					for _, p := range f.resources["Procedure"] {
+						if p["template"] != true || p["description"] != nil {
+							return fmt.Errorf("procedure meta in Komodo: %v %v", p["description"], p["template"])
+						}
+					}
+					return nil
+				}),
+			),
+		}},
+	})
+}
