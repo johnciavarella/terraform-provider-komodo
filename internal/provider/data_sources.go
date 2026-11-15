@@ -718,3 +718,76 @@ func (d *VariableDataSource) Read(ctx context.Context, req datasource.ReadReques
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
+
+// ---- Alerter data source ----
+
+var _ datasource.DataSource = &AlerterDataSource{}
+
+type AlerterDataSource struct{ client *client.Client }
+
+type AlerterDataSourceModel struct {
+	ID           types.String `tfsdk:"id"`
+	Name         types.String `tfsdk:"name"`
+	Enabled      types.Bool   `tfsdk:"enabled"`
+	EndpointType types.String `tfsdk:"endpoint_type"`
+	AlertTypes   types.List   `tfsdk:"alert_types"`
+}
+
+func NewAlerterDataSource() datasource.DataSource { return &AlerterDataSource{} }
+
+func (d *AlerterDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_alerter"
+}
+
+func (d *AlerterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetches a Komodo alerter by ID or name. The endpoint URL is not exposed, since it usually embeds a token.",
+		Attributes: map[string]schema.Attribute{
+			"id":            schema.StringAttribute{Required: true, Description: "Alerter ID or name."},
+			"name":          schema.StringAttribute{Computed: true},
+			"enabled":       schema.BoolAttribute{Computed: true, Description: "Whether the alerter sends alerts."},
+			"endpoint_type": schema.StringAttribute{Computed: true, Description: "Endpoint type: Custom, Slack, Discord, Ntfy or Pushover."},
+			"alert_types":   schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Alert types the alerter is limited to. Empty means all types."},
+		},
+	}
+}
+
+func (d *AlerterDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *client.Client, got: %T", req.ProviderData))
+		return
+	}
+	d.client = c
+}
+
+func (d *AlerterDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config AlerterDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	alerter, err := d.client.GetAlerter(ctx, config.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading alerter", err.Error())
+		return
+	}
+
+	config.ID = types.StringValue(alerter.ID)
+	config.Name = types.StringValue(alerter.Name)
+	config.Enabled = types.BoolValue(alerter.Config.Enabled)
+	config.EndpointType = types.StringValue(alerter.Config.Endpoint.Type)
+	alertTypes := alerter.Config.AlertTypes
+	if alertTypes == nil {
+		alertTypes = []string{}
+	}
+	list, diags := types.ListValueFrom(ctx, types.StringType, alertTypes)
+	resp.Diagnostics.Append(diags...)
+	config.AlertTypes = list
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}

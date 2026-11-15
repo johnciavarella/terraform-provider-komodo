@@ -262,3 +262,50 @@ resource "komodo_variable" "test" {
 }
 `, name, value, secret)
 }
+
+func TestAccAlerterResource_basic(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-test")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAlerterResourceConfig(rName, "Custom", "http://localhost:7000", `["ServerUnreachable", "StackStateChange"]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("komodo_alerter.test", "id"),
+					resource.TestCheckResourceAttr("komodo_alerter.test", "name", rName),
+					resource.TestCheckResourceAttr("komodo_alerter.test", "enabled", "false"),
+					resource.TestCheckResourceAttr("komodo_alerter.test", "endpoint.type", "Custom"),
+					resource.TestCheckResourceAttr("komodo_alerter.test", "alert_types.#", "2"),
+				),
+			},
+			{
+				Config: testAccAlerterResourceConfig(rName, "Ntfy", "http://localhost:8080/komodo", `[]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("komodo_alerter.test", "endpoint.type", "Ntfy"),
+					resource.TestCheckResourceAttr("komodo_alerter.test", "alert_types.#", "0"),
+				),
+			},
+			{
+				ResourceName:      "komodo_alerter.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// The alerter is created disabled so the test never sends a real alert.
+func testAccAlerterResourceConfig(name, endpointType, url, alertTypes string) string {
+	return fmt.Sprintf(`
+resource "komodo_alerter" "test" {
+  name    = %[1]q
+  enabled = false
+  endpoint = {
+    type = %[2]q
+    url  = %[3]q
+  }
+  alert_types = %[4]s
+}
+`, name, endpointType, url, alertTypes)
+}

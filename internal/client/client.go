@@ -1471,3 +1471,129 @@ func (c *Client) UpdateVariableIsSecret(ctx context.Context, name string, isSecr
 func (c *Client) DeleteVariable(ctx context.Context, name string) error {
 	return c.Write(ctx, "DeleteVariable", map[string]string{"name": name}, nil)
 }
+
+// ---- Alerter ----
+
+// AlerterEndpoint is an adjacently-tagged enum on the wire:
+//
+//	{"type": "Slack", "params": {"url": "..."}}
+//
+// Type is one of Custom, Slack, Discord, Ntfy, Pushover. Email only applies
+// to Ntfy.
+type AlerterEndpoint struct {
+	Type  string
+	URL   string
+	Email string
+}
+
+type alerterEndpointParams struct {
+	URL   string  `json:"url"`
+	Email *string `json:"email,omitempty"`
+}
+
+type alerterEndpointWire struct {
+	Type   string                `json:"type"`
+	Params alerterEndpointParams `json:"params"`
+}
+
+func (e AlerterEndpoint) MarshalJSON() ([]byte, error) {
+	w := alerterEndpointWire{Type: e.Type, Params: alerterEndpointParams{URL: e.URL}}
+	if e.Type == "Ntfy" && e.Email != "" {
+		w.Params.Email = &e.Email
+	}
+	return json.Marshal(w)
+}
+
+func (e *AlerterEndpoint) UnmarshalJSON(data []byte) error {
+	var w alerterEndpointWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	e.Type = w.Type
+	e.URL = w.Params.URL
+	e.Email = ""
+	if w.Params.Email != nil {
+		e.Email = *w.Params.Email
+	}
+	return nil
+}
+
+// AlerterConfig is sent in full on create and update. The slices carry no
+// omitempty so that an empty list clears the filter in Komodo.
+type AlerterConfig struct {
+	Enabled         bool             `json:"enabled"`
+	Endpoint        AlerterEndpoint  `json:"endpoint"`
+	AlertTypes      []string         `json:"alert_types"`
+	Resources       []ResourceTarget `json:"resources"`
+	ExceptResources []ResourceTarget `json:"except_resources"`
+}
+
+// normalize replaces nil slices with empty ones so they marshal as [] and
+// not null.
+func (c *AlerterConfig) normalize() {
+	if c.AlertTypes == nil {
+		c.AlertTypes = []string{}
+	}
+	if c.Resources == nil {
+		c.Resources = []ResourceTarget{}
+	}
+	if c.ExceptResources == nil {
+		c.ExceptResources = []ResourceTarget{}
+	}
+}
+
+type Alerter struct {
+	ID     string        `json:"-"`
+	Name   string        `json:"name"`
+	Tags   []string      `json:"tags,omitempty"`
+	Config AlerterConfig `json:"config"`
+}
+
+func (a *Alerter) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		ID     json.RawMessage `json:"_id"`
+		Name   string          `json:"name"`
+		Tags   []string        `json:"tags,omitempty"`
+		Config AlerterConfig   `json:"config"`
+	}
+	var al alias
+	if err := json.Unmarshal(data, &al); err != nil {
+		return err
+	}
+	a.ID = parseMongoID(al.ID)
+	a.Name = al.Name
+	a.Tags = al.Tags
+	a.Config = al.Config
+	return nil
+}
+
+func (c *Client) CreateAlerter(ctx context.Context, name string, config AlerterConfig) (*Alerter, error) {
+	config.normalize()
+	var a Alerter
+	err := c.Write(ctx, "CreateAlerter", map[string]interface{}{"name": name, "config": config}, &a)
+	return &a, err
+}
+
+func (c *Client) GetAlerter(ctx context.Context, idOrName string) (*Alerter, error) {
+	if idOrName == "" {
+		return nil, &NotFoundError{Message: "alerter identifier is empty"}
+	}
+	var a Alerter
+	err := c.Read(ctx, "GetAlerter", map[string]string{"alerter": idOrName}, &a)
+	return &a, err
+}
+
+func (c *Client) UpdateAlerter(ctx context.Context, id string, config AlerterConfig) (*Alerter, error) {
+	config.normalize()
+	var a Alerter
+	err := c.Write(ctx, "UpdateAlerter", map[string]interface{}{"id": id, "config": config}, &a)
+	return &a, err
+}
+
+func (c *Client) RenameAlerter(ctx context.Context, id, name string) error {
+	return c.Write(ctx, "RenameAlerter", map[string]string{"id": id, "name": name}, nil)
+}
+
+func (c *Client) DeleteAlerter(ctx context.Context, id string) error {
+	return c.Write(ctx, "DeleteAlerter", IDParam{ID: id}, nil)
+}
