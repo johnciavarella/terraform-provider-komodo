@@ -126,7 +126,7 @@ func (r *BuildResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"use_buildx":         schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Use docker buildx."},
 			"build_args":         schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Build arguments."},
 			"secret_args":        schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Secret build arguments, newline-separated KEY=value. Passed with docker secret mounts so they are not visible in the final image, unlike build_args."},
-			"extra_args":         schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "Extra docker CLI arguments to include in the build command."},
+			"extra_args":         schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "Extra docker CLI arguments to include in the build command. Leave it out and Terraform does not manage the list; set it to [] to clear it."},
 			"version": schema.StringAttribute{
 				Optional: true, Computed: true,
 				Description:   "Current build version as major.minor.patch (e.g. \"1.2.3\"). Komodo bumps the patch on every build while auto_increment_version is true, so only set this together with auto_increment_version = false.",
@@ -189,21 +189,23 @@ func buildConfigFromModel(ctx context.Context, m *BuildResourceModel) client.Bui
 		SkipSecretInterp:     client.BoolPtr(m.SkipSecretInterp.ValueBool()),
 		UseBuildx:            client.BoolPtr(m.UseBuildx.ValueBool()),
 		BuildArgs:            m.BuildArgs.ValueString(),
-		SecretArgs:           m.SecretArgs.ValueString(),
-		Labels:               m.Labels.ValueString(),
-		WebhookEnabled:       client.BoolPtr(m.WebhookEnabled.ValueBool()),
-		WebhookSecret:        m.WebhookSecret.ValueString(),
-		FilesOnHost:          client.BoolPtr(m.FilesOnHost.ValueBool()),
+		// A pointer, so an empty value is still sent and clears the args.
+		SecretArgs:     client.StringPtr(m.SecretArgs.ValueString()),
+		Labels:         m.Labels.ValueString(),
+		WebhookEnabled: client.BoolPtr(m.WebhookEnabled.ValueBool()),
+		WebhookSecret:  m.WebhookSecret.ValueString(),
+		FilesOnHost:    client.BoolPtr(m.FilesOnHost.ValueBool()),
 	}
 	if !m.Links.IsNull() && !m.Links.IsUnknown() {
 		var v []string
 		m.Links.ElementsAs(ctx, &v, false)
 		cfg.Links = v
 	}
+	// Null means "not managed" and nothing is sent; [] is sent and clears.
 	if !m.ExtraArgs.IsNull() && !m.ExtraArgs.IsUnknown() {
-		var v []string
+		v := []string{}
 		m.ExtraArgs.ElementsAs(ctx, &v, false)
-		cfg.ExtraArgs = v
+		cfg.ExtraArgs = &v
 	}
 	// Version is validated in ValidateConfig; an unparsable value is skipped here.
 	if !m.Version.IsNull() && !m.Version.IsUnknown() {
@@ -255,8 +257,19 @@ func mapBuildToModel(ctx context.Context, c *client.Client, b *client.Build, m *
 	m.Dockerfile = types.StringValue(strings.TrimRight(b.Config.Dockerfile, "\n"))
 	m.BuildArgs = types.StringValue(strings.TrimRight(b.Config.BuildArgs, "\n"))
 	m.Labels = types.StringValue(strings.TrimRight(b.Config.Labels, "\n"))
-	m.SecretArgs = types.StringValue(strings.TrimRight(b.Config.SecretArgs, "\n"))
-	m.ExtraArgs = mapListToModel(b.Config.ExtraArgs, m.ExtraArgs)
+	secretArgs := ""
+	if b.Config.SecretArgs != nil {
+		secretArgs = strings.TrimRight(*b.Config.SecretArgs, "\n")
+	}
+	m.SecretArgs = types.StringValue(secretArgs)
+	// Unmanaged (null) stays null; otherwise show what Komodo has.
+	if m.ExtraArgs.IsNull() || m.ExtraArgs.IsUnknown() {
+		m.ExtraArgs = types.ListNull(types.StringType)
+	} else if b.Config.ExtraArgs != nil && len(*b.Config.ExtraArgs) > 0 {
+		m.ExtraArgs, _ = types.ListValueFrom(ctx, types.StringType, *b.Config.ExtraArgs)
+	} else {
+		m.ExtraArgs = types.ListValueMust(types.StringType, []attr.Value{})
+	}
 	if b.Config.Version != nil {
 		m.Version = types.StringValue(b.Config.Version.String())
 	} else if m.Version.IsUnknown() {

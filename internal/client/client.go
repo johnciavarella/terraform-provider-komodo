@@ -665,10 +665,10 @@ type BuildConfig struct {
 	ImageRegistry        []ImageRegistryConfig `json:"image_registry,omitempty"`
 	SkipSecretInterp     *bool                 `json:"skip_secret_interp,omitempty"`
 	UseBuildx            *bool                 `json:"use_buildx,omitempty"`
-	ExtraArgs            []string              `json:"extra_args,omitempty"`
+	ExtraArgs            *[]string             `json:"extra_args,omitempty"`
 	PreBuild             *SystemCommand        `json:"pre_build,omitempty"`
 	BuildArgs            string                `json:"build_args,omitempty"`
-	SecretArgs           string                `json:"secret_args,omitempty"`
+	SecretArgs           *string               `json:"secret_args,omitempty"`
 	Labels               string                `json:"labels,omitempty"`
 }
 

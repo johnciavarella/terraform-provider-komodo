@@ -58,7 +58,7 @@ resource "komodo_build" "api" {
 - `commit` (String) Specific commit hash.
 - `dockerfile` (String) Inline Dockerfile contents (alternative to dockerfile_path).
 - `dockerfile_path` (String) Path to Dockerfile. Komodo defaults this to "Dockerfile" if empty.
-- `extra_args` (List of String) Extra docker CLI arguments to include in the build command.
+- `extra_args` (List of String) Extra docker CLI arguments to include in the build command. Leave it out and Terraform does not manage the list; set it to [] to clear it.
 - `files_on_host` (Boolean) Source files from host.
 - `git_account` (String) Git account for private repos.
 - `git_https` (Boolean) Use HTTPS to clone.
