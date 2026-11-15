@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -21,8 +22,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &ServerResource{}
-	_ resource.ResourceWithImportState = &ServerResource{}
+	_ resource.Resource                   = &ServerResource{}
+	_ resource.ResourceWithImportState    = &ServerResource{}
+	_ resource.ResourceWithValidateConfig = &ServerResource{}
 )
 
 type ServerResource struct {
@@ -352,6 +354,67 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				ElementType: types.StringType,
 			},
 		},
+	}
+}
+
+// ValidateConfig checks maintenance window values that Komodo either rejects
+// with an opaque error or accepts without acting on them.
+func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var windows types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("maintenance_windows"), &windows)...)
+	if windows.IsNull() || windows.IsUnknown() {
+		return
+	}
+	for i, v := range windows.Elements() {
+		obj, ok := v.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		at := path.Root("maintenance_windows").AtListIndex(i)
+		attrs := obj.Attributes()
+		intRange := func(name string, min, max int64) {
+			n, ok := attrs[name].(types.Int64)
+			if !ok || n.IsNull() || n.IsUnknown() {
+				return
+			}
+			if n.ValueInt64() < min || n.ValueInt64() > max {
+				resp.Diagnostics.AddAttributeError(at.AtName(name), "Invalid "+name,
+					fmt.Sprintf("%d is out of range: must be between %d and %d.", n.ValueInt64(), min, max))
+			}
+		}
+		intRange("hour", 0, 23)
+		intRange("minute", 0, 59)
+		intRange("duration_minutes", 1, 4294967295)
+
+		// str reads a string attribute; null reads as "". ok is false while
+		// the value is not known yet.
+		str := func(name string) (string, bool) {
+			s, ok := attrs[name].(types.String)
+			if !ok || s.IsUnknown() {
+				return "", false
+			}
+			return s.ValueString(), true
+		}
+		scheduleType, ok := str("schedule_type")
+		if !ok {
+			continue
+		}
+		switch scheduleType {
+		case "", "Daily":
+		case "Weekly":
+			if day, ok := str("day_of_week"); ok && day == "" {
+				resp.Diagnostics.AddAttributeError(at.AtName("day_of_week"), "Missing day_of_week", "A Weekly window needs day_of_week, for example \"Monday\".")
+			}
+		case "OneTime":
+			if date, ok := str("date"); ok {
+				if _, err := time.Parse("2006-01-02", date); err != nil {
+					resp.Diagnostics.AddAttributeError(at.AtName("date"), "Invalid date", "A OneTime window needs date as YYYY-MM-DD.")
+				}
+			}
+		default:
+			resp.Diagnostics.AddAttributeError(at.AtName("schedule_type"), "Invalid schedule_type",
+				fmt.Sprintf("%q is not one of: Daily, Weekly, OneTime.", scheduleType))
+		}
 	}
 }
 
