@@ -1072,11 +1072,14 @@ type ApiKeyResponse struct {
 	Secret string `json:"secret"`
 }
 
-func (c *Client) CreateApiKeyForServiceUser(ctx context.Context, userID, name string) (*ApiKeyResponse, error) {
+// CreateApiKeyForServiceUser creates a key. expires is a unix timestamp in
+// milliseconds; 0 means the key never expires.
+func (c *Client) CreateApiKeyForServiceUser(ctx context.Context, userID, name string, expires int64) (*ApiKeyResponse, error) {
 	var r ApiKeyResponse
-	err := c.Write(ctx, "CreateApiKeyForServiceUser", map[string]string{
+	err := c.Write(ctx, "CreateApiKeyForServiceUser", map[string]interface{}{
 		"user_id": userID,
 		"name":    name,
+		"expires": expires,
 	}, &r)
 	return &r, err
 }
