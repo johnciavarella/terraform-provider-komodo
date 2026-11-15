@@ -63,6 +63,8 @@ type BuildResourceModel struct {
 	PreBuildPath         types.String `tfsdk:"pre_build_path"`
 	PreBuildCommand      types.String `tfsdk:"pre_build_command"`
 	Tags                 types.List   `tfsdk:"tags"`
+	Description          types.String `tfsdk:"description"`
+	Template             types.Bool   `tfsdk:"template"`
 }
 
 // imageRegistryObjectType is the Terraform object shape for `image_registry`
@@ -138,6 +140,8 @@ func (r *BuildResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"files_on_host":     schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Source files from host."},
 			"pre_build_path":    schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Working directory for the pre-build command."},
 			"pre_build_command": schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run before docker build."},
+			"description":       metaDescriptionAttribute(),
+			"template":          metaTemplateAttribute(),
 			"tags":              schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this build."},
 		},
 	}
@@ -361,6 +365,7 @@ func (r *BuildResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tagsFromPlan := plan.Tags
 	mapBuildToModel(ctx, r.client, build, &plan)
 	applyResourceTags(ctx, r.client, "Build", build.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Build", build.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -386,6 +391,7 @@ func (r *BuildResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	mapBuildToModel(ctx, r.client, build, &state)
+	readResourceMeta(ctx, r.client, "Build", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -422,6 +428,7 @@ func (r *BuildResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tagsFromPlan := plan.Tags
 	mapBuildToModel(ctx, r.client, build, &plan)
 	applyResourceTags(ctx, r.client, "Build", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Build", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

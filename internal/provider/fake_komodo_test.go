@@ -221,7 +221,12 @@ func (f *fakeKomodo) handle(w http.ResponseWriter, r *http.Request) {
 			notFound()
 			return
 		}
-		res["tags"] = p["tags"]
+		// Like Komodo, only the fields present in the request are changed.
+		for _, k := range []string{"tags", "description", "template"} {
+			if v, ok := p[k]; ok {
+				res[k] = v
+			}
+		}
 		reply(map[string]interface{}{})
 	case "CreateApiKeyForServiceUser":
 		f.nextID++

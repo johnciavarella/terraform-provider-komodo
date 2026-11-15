@@ -43,6 +43,7 @@ resource "komodo_server" "web_01" {
 - `auto_rotate_keys` (Boolean) Whether Komodo should automatically rotate the Periphery keypair as part of RotateAllServerKeys.
 - `cpu_critical` (Number) CPU critical threshold percentage.
 - `cpu_warning` (Number) CPU warning threshold percentage.
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `disk_critical` (Number) Disk critical threshold percentage.
 - `disk_warning` (Number) Disk warning threshold percentage.
 - `enabled` (Boolean) Whether the server is enabled.
@@ -63,6 +64,7 @@ resource "komodo_server" "web_01" {
 - `send_version_mismatch_alerts` (Boolean) Whether to send alerts when the server's Periphery version does not match Core. When unset, Komodo's own default (true) applies.
 - `stats_monitoring` (Boolean) Whether to monitor server stats beyond health check.
 - `tags` (List of String) List of tag names to apply to this server.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 
 ### Read-Only
 

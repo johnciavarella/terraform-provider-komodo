@@ -44,6 +44,7 @@ resource "komodo_repo" "tooling" {
 - `branch` (String) Branch. Komodo defaults this to "main" if empty.
 - `builder_id` (String) Builder to clone onto (ID or name). Set this OR server_id, not both.
 - `commit` (String) Specific commit hash.
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `env_file_path` (String) Filename to write environment to. Komodo defaults this to .env if empty.
 - `environment` (String) Environment variables (KEY=VALUE, newline separated) for on_clone / on_pull commands.
 - `git_account` (String) Git account for private repos.
@@ -59,6 +60,7 @@ resource "komodo_repo" "tooling" {
 - `server_id` (String) Server to clone onto (ID or name).
 - `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in environment.
 - `tags` (List of String) List of tag names to apply to this repo.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 - `webhook_enabled` (Boolean) Enable webhooks.
 - `webhook_secret` (String, Sensitive) Alternate webhook secret for this repo.
 

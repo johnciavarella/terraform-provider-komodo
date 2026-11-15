@@ -56,6 +56,7 @@ resource "komodo_stack" "web" {
 - `compose_cmd_wrapper_include` (List of String) Compose subcommands to wrap with compose_cmd_wrapper (e.g. ["up", "build"]).
 - `config_files` (Attributes List) Extra files, besides the compose and env files, that Komodo tracks for this stack. A change to one counts as a change in DeployStackIfChanged. Env files passed with --env-file belong in additional_env_files instead. Leave it out and Terraform does not manage the list; set it to [] to clear it. (see [below for nested schema](#nestedatt--config_files))
 - `deployed` (Boolean) When true, triggers a full DeployStack (git pull + compose up) after create/update. Use this to redeploy on config changes. Like started, this is intent-based and async.
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `destroy_before_deploy` (Boolean) Whether to run docker compose down before compose up.
 - `env_file_path` (String) Name of the environment file written before docker compose up.
 - `environment` (String) Environment variables written to the env file before docker compose up (KEY=VALUE format, newline separated).
@@ -87,6 +88,7 @@ resource "komodo_stack" "web" {
 - `started` (Boolean) Whether the stack should be running. When true, runs DeployStack (compose up) to create and start containers. When false, runs DestroyStack (compose down) to stop and remove them. Intent-based and async.
 - `swarm_id` (String) Swarm to attach the stack to (ID or name). Mutually exclusive with server_id for swarm-mode deployments.
 - `tags` (List of String) List of tag names to apply to this stack.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 - `webhook_enabled` (Boolean) Whether incoming webhooks trigger action.
 - `webhook_force_deploy` (Boolean) Always execute deployment without comparing changes when webhook fires.
 - `webhook_secret` (String, Sensitive) Alternate webhook secret for this stack.

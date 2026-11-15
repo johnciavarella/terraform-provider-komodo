@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/johnciavarella/terraform-provider-komodo/internal/client"
 )
@@ -217,6 +218,61 @@ func applyResourceTags(ctx context.Context, c *client.Client, targetType, id str
 	tags.ElementsAs(ctx, &tagStrings, false)
 	if err := c.UpdateResourceMeta(ctx, targetType, id, tagStrings); err != nil {
 		diags.AddError("Error updating resource tags", err.Error())
+	}
+}
+
+// metaDescriptionAttribute and metaTemplateAttribute are shared by every
+// taggable resource. Both follow the "not managed unless configured" rule:
+// left out of config, the value in Komodo is neither changed nor read.
+func metaDescriptionAttribute() resourceschema.StringAttribute {
+	return resourceschema.StringAttribute{
+		Optional:    true,
+		Description: "Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to \"\" to clear it.",
+	}
+}
+
+func metaTemplateAttribute() resourceschema.BoolAttribute {
+	return resourceschema.BoolAttribute{
+		Optional:    true,
+		Description: "Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.",
+	}
+}
+
+// applyResourceMeta sends description and template when they are configured.
+func applyResourceMeta(ctx context.Context, c *client.Client, targetType, id string, description types.String, template types.Bool, diags *diag.Diagnostics) {
+	var d *string
+	var t *bool
+	if !description.IsNull() && !description.IsUnknown() {
+		d = client.StringPtr(description.ValueString())
+	}
+	if !template.IsNull() && !template.IsUnknown() {
+		t = client.BoolPtr(template.ValueBool())
+	}
+	if d == nil && t == nil {
+		return
+	}
+	if err := c.UpdateResourceMetaFields(ctx, targetType, id, d, t); err != nil {
+		diags.AddError("Error updating resource description/template", err.Error())
+	}
+}
+
+// readResourceMeta refreshes description and template from Komodo, but only
+// the ones that are managed (non-null in state). It makes no API call when
+// neither is.
+func readResourceMeta(ctx context.Context, c *client.Client, targetType, id string, description *types.String, template *types.Bool, diags *diag.Diagnostics) {
+	if description.IsNull() && template.IsNull() {
+		return
+	}
+	meta, err := c.GetResourceMeta(ctx, targetType, id)
+	if err != nil {
+		diags.AddError("Error reading resource description/template", err.Error())
+		return
+	}
+	if !description.IsNull() {
+		*description = types.StringValue(meta.Description)
+	}
+	if !template.IsNull() {
+		*template = types.BoolValue(meta.Template)
 	}
 }
 

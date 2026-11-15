@@ -50,6 +50,8 @@ type RepoResourceModel struct {
 	EnvFilePath      types.String `tfsdk:"env_file_path"`
 	SkipSecretInterp types.Bool   `tfsdk:"skip_secret_interp"`
 	Tags             types.List   `tfsdk:"tags"`
+	Description      types.String `tfsdk:"description"`
+	Template         types.Bool   `tfsdk:"template"`
 }
 
 func NewRepoResource() resource.Resource {
@@ -88,6 +90,8 @@ func (r *RepoResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 			"environment":        schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Environment variables (KEY=VALUE, newline separated) for on_clone / on_pull commands."},
 			"env_file_path":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(".env"), Description: "Filename to write environment to. Komodo defaults this to .env if empty."},
 			"skip_secret_interp": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Skip Komodo variable / secret interpolation in environment."},
+			"description":        metaDescriptionAttribute(),
+			"template":           metaTemplateAttribute(),
 			"tags":               schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this repo."},
 		},
 	}
@@ -208,6 +212,7 @@ func (r *RepoResource) Create(ctx context.Context, req resource.CreateRequest, r
 	tagsFromPlan := plan.Tags
 	mapRepoToModel(ctx, r.client, repo, &plan)
 	applyResourceTags(ctx, r.client, "Repo", repo.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Repo", repo.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -233,6 +238,7 @@ func (r *RepoResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 
 	mapRepoToModel(ctx, r.client, repo, &state)
+	readResourceMeta(ctx, r.client, "Repo", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -272,6 +278,7 @@ func (r *RepoResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	tagsFromPlan := plan.Tags
 	mapRepoToModel(ctx, r.client, repo, &plan)
 	applyResourceTags(ctx, r.client, "Repo", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Repo", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

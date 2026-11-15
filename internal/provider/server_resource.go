@@ -57,6 +57,8 @@ type ServerResourceModel struct {
 	DiskWarning               types.Float64 `tfsdk:"disk_warning"`
 	DiskCritical              types.Float64 `tfsdk:"disk_critical"`
 	Tags                      types.List    `tfsdk:"tags"`
+	Description               types.String  `tfsdk:"description"`
+	Template                  types.Bool    `tfsdk:"template"`
 }
 
 // maintenanceWindowObjectType is the Terraform object type for entries in
@@ -341,6 +343,8 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				Default:     float64default.StaticFloat64(95),
 			},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
 			"tags": schema.ListAttribute{
 				Description: "List of tag names to apply to this server.",
 				Optional:    true,
@@ -435,6 +439,7 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 	tagsFromPlan := plan.Tags
 	mapServerToModel(ctx, r.client, server, &plan)
 	applyResourceTags(ctx, r.client, "Server", server.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Server", server.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -460,6 +465,7 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	mapServerToModel(ctx, r.client, server, &state)
+	readResourceMeta(ctx, r.client, "Server", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -511,6 +517,7 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	tagsFromPlan := plan.Tags
 	mapServerToModel(ctx, r.client, server, &plan)
 	applyResourceTags(ctx, r.client, "Server", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Server", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

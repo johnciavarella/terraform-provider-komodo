@@ -56,6 +56,7 @@ resource "komodo_build" "api" {
 - `build_path` (String) Build context path.
 - `builder_id` (String) Builder used to build the image (ID or name).
 - `commit` (String) Specific commit hash.
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `dockerfile` (String) Inline Dockerfile contents (alternative to dockerfile_path).
 - `dockerfile_path` (String) Path to Dockerfile. Komodo defaults this to "Dockerfile" if empty.
 - `extra_args` (List of String) Extra docker CLI arguments to include in the build command. Leave it out and Terraform does not manage the list; set it to [] to clear it.
@@ -78,6 +79,7 @@ resource "komodo_build" "api" {
 - `secret_args` (String, Sensitive) Secret build arguments, newline-separated KEY=value. Passed with docker secret mounts so they are not visible in the final image, unlike build_args.
 - `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in build_args.
 - `tags` (List of String) List of tag names to apply to this build.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 - `use_buildx` (Boolean) Use docker buildx.
 - `version` (String) Current build version as major.minor.patch (e.g. "1.2.3"). Komodo bumps the patch on every build while auto_increment_version is true, so only set this together with auto_increment_version = false.
 - `webhook_enabled` (Boolean) Enable webhooks.

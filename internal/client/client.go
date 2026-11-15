@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -895,6 +896,33 @@ func (c *Client) UpdateResourceMeta(ctx context.Context, targetType, id string, 
 		Target: ResourceTarget{Type: targetType, ID: id},
 		Tags:   tags,
 	}, nil)
+}
+
+// ResourceMeta is the description and template flag every Komodo resource
+// carries alongside its tags.
+type ResourceMeta struct {
+	Description string `json:"description"`
+	Template    bool   `json:"template"`
+}
+
+// UpdateResourceMetaFields sets a resource's description and/or template
+// flag. A nil argument leaves that field as it is. Tags are not touched.
+func (c *Client) UpdateResourceMetaFields(ctx context.Context, targetType, id string, description *string, template *bool) error {
+	params := struct {
+		Target      ResourceTarget `json:"target"`
+		Description *string        `json:"description,omitempty"`
+		Template    *bool          `json:"template,omitempty"`
+	}{Target: ResourceTarget{Type: targetType, ID: id}, Description: description, Template: template}
+	return c.Write(ctx, "UpdateResourceMeta", params, nil)
+}
+
+// GetResourceMeta reads the description and template flag of a resource of
+// the given type ("Server", "Stack", ...) by ID or name.
+func (c *Client) GetResourceMeta(ctx context.Context, targetType, idOrName string) (*ResourceMeta, error) {
+	var m ResourceMeta
+	key := strings.ToLower(targetType)
+	err := c.Read(ctx, "Get"+targetType, map[string]string{key: idOrName}, &m)
+	return &m, err
 }
 
 // ---- Builder ----

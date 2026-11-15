@@ -101,6 +101,8 @@ type StackResourceModel struct {
 	Started                  types.Bool   `tfsdk:"started"`
 	Deployed                 types.Bool   `tfsdk:"deployed"`
 	Tags                     types.List   `tfsdk:"tags"`
+	Description              types.String `tfsdk:"description"`
+	Template                 types.Bool   `tfsdk:"template"`
 }
 
 // additionalEnvFileObjectType is the Terraform object type for entries in
@@ -454,6 +456,8 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
 			"tags": schema.ListAttribute{
 				Description: "List of tag names to apply to this stack.",
 				Optional:    true,
@@ -827,6 +831,7 @@ func (r *StackResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tagsFromPlan := plan.Tags
 	mapStackToModel(ctx, r.client, stack, &plan)
 	applyResourceTags(ctx, r.client, "Stack", stack.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Stack", stack.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -877,6 +882,7 @@ func (r *StackResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	// `started` is an intent attribute — leave it as whatever is in state.
 	// StartStack/StopStack are async so reading container state immediately
 	// after would race. Drift is surfaced the next time apply is run.
+	readResourceMeta(ctx, r.client, "Stack", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -921,6 +927,7 @@ func (r *StackResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tagsFromPlan := plan.Tags
 	mapStackToModel(ctx, r.client, stack, &plan)
 	applyResourceTags(ctx, r.client, "Stack", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Stack", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

@@ -431,3 +431,147 @@ func TestLifecycleApiKeyExpires(t *testing.T) {
 		},
 	})
 }
+
+// description and template are shared by every taggable resource.
+func TestLifecycleDescriptionAndTemplate(t *testing.T) {
+	requireTerraform(t)
+	f, srv := newFakeKomodo(t)
+	f.mu.Lock()
+	for _, k := range []string{"Build", "Repo"} {
+		fakeKinds = append(fakeKinds, k)
+		f.resources[k] = map[string]map[string]interface{}{}
+	}
+	f.mu.Unlock()
+	t.Cleanup(func() { fakeKinds = fakeKinds[:len(fakeKinds)-2] })
+
+	cfg := func(meta string) string {
+		return f.providerConfig(srv.URL) + `
+resource "komodo_server" "x" {
+  name    = "srv"
+  address = "https://10.0.0.1:8120"
+` + meta + `
+}
+resource "komodo_stack" "x" {
+  name      = "stk"
+  server_id = "s"
+  started   = false
+  deployed  = false
+` + meta + `
+}
+resource "komodo_deployment" "x" {
+  name      = "dep"
+  server_id = "s"
+  image     = "nginx"
+  started   = false
+  deployed  = false
+` + meta + `
+}
+resource "komodo_build" "x" {
+  name = "bld"
+` + meta + `
+}
+resource "komodo_repo" "x" {
+  name = "rpo"
+` + meta + `
+}
+resource "komodo_builder" "x" {
+  name = "bdr"
+` + meta + `
+}`
+	}
+	kinds := map[string]string{"Server": "komodo_server.x", "Stack": "komodo_stack.x", "Deployment": "komodo_deployment.x",
+		"Build": "komodo_build.x", "Repo": "komodo_repo.x", "Builder": "komodo_builder.x"}
+	// stored returns what the fake holds for the single resource of a kind.
+	stored := func(kind string) (interface{}, interface{}) {
+		for _, r := range f.resources[kind] {
+			return r["description"], r["template"]
+		}
+		return nil, nil
+	}
+	each := func(check func(kind, addr string) resource.TestCheckFunc) resource.TestCheckFunc {
+		var checks []resource.TestCheckFunc
+		for kind, addr := range kinds {
+			checks = append(checks, check(kind, addr))
+		}
+		return resource.ComposeAggregateTestCheckFunc(checks...)
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             f.checkEmpty(t),
+		Steps: []resource.TestStep{
+			{ // not configured: never sent
+				Config: cfg(``),
+				Check: each(func(kind, addr string) resource.TestCheckFunc {
+					return resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr(addr, "description"),
+						resource.TestCheckNoResourceAttr(addr, "template"),
+						f.check(func() error {
+							if d, tpl := stored(kind); d != nil || tpl != nil {
+								return fmt.Errorf("%s: meta sent although not configured: %v %v", kind, d, tpl)
+							}
+							return nil
+						}),
+					)
+				}),
+			},
+			{ // set in the Komodo UI while unmanaged: not drift, and left alone
+				PreConfig: func() {
+					f.mu.Lock()
+					for kind := range kinds {
+						for _, r := range f.resources[kind] {
+							r["description"] = "written in the UI"
+						}
+					}
+					f.mu.Unlock()
+				},
+				Config:   cfg(``),
+				PlanOnly: true,
+			},
+			{
+				Config: cfg(`  description = "managed by terraform"
+  template    = true`),
+				Check: each(func(kind, addr string) resource.TestCheckFunc {
+					return resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr(addr, "description", "managed by terraform"),
+						resource.TestCheckResourceAttr(addr, "template", "true"),
+						f.check(func() error {
+							if d, tpl := stored(kind); d != "managed by terraform" || tpl != true {
+								return fmt.Errorf("%s: stored meta = %v %v", kind, d, tpl)
+							}
+							return nil
+						}),
+					)
+				}),
+			},
+			{ // changed in the UI while managed: shows as drift
+				PreConfig: func() {
+					f.mu.Lock()
+					for _, r := range f.resources["Stack"] {
+						r["description"] = "edited in the UI"
+					}
+					f.mu.Unlock()
+				},
+				Config: cfg(`  description = "managed by terraform"
+  template    = true`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{ // "" clears the description; template dropped from config is left as is
+				Config: cfg(`  description = ""`),
+				Check: each(func(kind, addr string) resource.TestCheckFunc {
+					return resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr(addr, "description", ""),
+						resource.TestCheckNoResourceAttr(addr, "template"),
+						f.check(func() error {
+							if d, tpl := stored(kind); d != "" || tpl != true {
+								return fmt.Errorf("%s: stored meta = %q %v, want \"\" true", kind, d, tpl)
+							}
+							return nil
+						}),
+					)
+				}),
+			},
+		},
+	})
+}

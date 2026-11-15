@@ -60,6 +60,8 @@ type DeploymentResourceModel struct {
 	Started              types.Bool   `tfsdk:"started"`
 	Deployed             types.Bool   `tfsdk:"deployed"`
 	Tags                 types.List   `tfsdk:"tags"`
+	Description          types.String `tfsdk:"description"`
+	Template             types.Bool   `tfsdk:"template"`
 }
 
 func NewDeploymentResource() resource.Resource {
@@ -240,6 +242,8 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
 			"tags": schema.ListAttribute{
 				Description: "List of tag names to apply to this deployment.",
 				Optional:    true,
@@ -423,6 +427,7 @@ func (r *DeploymentResource) Create(ctx context.Context, req resource.CreateRequ
 	tagsFromPlan := plan.Tags
 	mapDeploymentToModel(ctx, r.client, deployment, &plan)
 	applyResourceTags(ctx, r.client, "Deployment", deployment.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Deployment", deployment.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -454,6 +459,7 @@ func (r *DeploymentResource) Read(ctx context.Context, req resource.ReadRequest,
 	}
 
 	mapDeploymentToModel(ctx, r.client, deployment, &state)
+	readResourceMeta(ctx, r.client, "Deployment", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -494,6 +500,7 @@ func (r *DeploymentResource) Update(ctx context.Context, req resource.UpdateRequ
 	tagsFromPlan := plan.Tags
 	mapDeploymentToModel(ctx, r.client, deployment, &plan)
 	applyResourceTags(ctx, r.client, "Deployment", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Deployment", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
