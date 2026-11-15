@@ -59,6 +59,7 @@ resource "komodo_server" "web_01" {
 - `send_disk_alerts` (Boolean) Whether to send alerts about disk status.
 - `send_mem_alerts` (Boolean) Whether to send alerts about memory status.
 - `send_unreachable_alerts` (Boolean) Whether to send alerts about server reachability.
+- `send_version_mismatch_alerts` (Boolean) Whether to send alerts when the server's Periphery version does not match Core. When unset, Komodo's own default (true) applies.
 - `stats_monitoring` (Boolean) Whether to monitor server stats beyond health check.
 - `tags` (List of String) List of tag names to apply to this server.
 

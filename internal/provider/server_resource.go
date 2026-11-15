@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/float64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -27,31 +28,32 @@ type ServerResource struct {
 }
 
 type ServerResourceModel struct {
-	ID                    types.String  `tfsdk:"id"`
-	Name                  types.String  `tfsdk:"name"`
-	Address               types.String  `tfsdk:"address"`
-	ExternalAddress       types.String  `tfsdk:"external_address"`
-	Region                types.String  `tfsdk:"region"`
-	Enabled               types.Bool    `tfsdk:"enabled"`
-	Passkey               types.String  `tfsdk:"passkey"`
-	InsecureTLS           types.Bool    `tfsdk:"insecure_tls"`
-	AutoRotateKeys        types.Bool    `tfsdk:"auto_rotate_keys"`
-	PeripheryPublicKey    types.String  `tfsdk:"periphery_public_key"`
-	IgnoreMounts          types.List    `tfsdk:"ignore_mounts"`
-	Links                 types.List    `tfsdk:"links"`
-	StatsMonitoring       types.Bool    `tfsdk:"stats_monitoring"`
-	AutoPrune             types.Bool    `tfsdk:"auto_prune"`
-	SendUnreachableAlerts types.Bool    `tfsdk:"send_unreachable_alerts"`
-	SendCPUAlerts         types.Bool    `tfsdk:"send_cpu_alerts"`
-	SendMemAlerts         types.Bool    `tfsdk:"send_mem_alerts"`
-	SendDiskAlerts        types.Bool    `tfsdk:"send_disk_alerts"`
-	CPUWarning            types.Float64 `tfsdk:"cpu_warning"`
-	CPUCritical           types.Float64 `tfsdk:"cpu_critical"`
-	MemWarning            types.Float64 `tfsdk:"mem_warning"`
-	MemCritical           types.Float64 `tfsdk:"mem_critical"`
-	DiskWarning           types.Float64 `tfsdk:"disk_warning"`
-	DiskCritical          types.Float64 `tfsdk:"disk_critical"`
-	Tags                  types.List    `tfsdk:"tags"`
+	ID                        types.String  `tfsdk:"id"`
+	Name                      types.String  `tfsdk:"name"`
+	Address                   types.String  `tfsdk:"address"`
+	ExternalAddress           types.String  `tfsdk:"external_address"`
+	Region                    types.String  `tfsdk:"region"`
+	Enabled                   types.Bool    `tfsdk:"enabled"`
+	Passkey                   types.String  `tfsdk:"passkey"`
+	InsecureTLS               types.Bool    `tfsdk:"insecure_tls"`
+	AutoRotateKeys            types.Bool    `tfsdk:"auto_rotate_keys"`
+	PeripheryPublicKey        types.String  `tfsdk:"periphery_public_key"`
+	IgnoreMounts              types.List    `tfsdk:"ignore_mounts"`
+	Links                     types.List    `tfsdk:"links"`
+	StatsMonitoring           types.Bool    `tfsdk:"stats_monitoring"`
+	AutoPrune                 types.Bool    `tfsdk:"auto_prune"`
+	SendUnreachableAlerts     types.Bool    `tfsdk:"send_unreachable_alerts"`
+	SendCPUAlerts             types.Bool    `tfsdk:"send_cpu_alerts"`
+	SendMemAlerts             types.Bool    `tfsdk:"send_mem_alerts"`
+	SendDiskAlerts            types.Bool    `tfsdk:"send_disk_alerts"`
+	SendVersionMismatchAlerts types.Bool    `tfsdk:"send_version_mismatch_alerts"`
+	CPUWarning                types.Float64 `tfsdk:"cpu_warning"`
+	CPUCritical               types.Float64 `tfsdk:"cpu_critical"`
+	MemWarning                types.Float64 `tfsdk:"mem_warning"`
+	MemCritical               types.Float64 `tfsdk:"mem_critical"`
+	DiskWarning               types.Float64 `tfsdk:"disk_warning"`
+	DiskCritical              types.Float64 `tfsdk:"disk_critical"`
+	Tags                      types.List    `tfsdk:"tags"`
 }
 
 func NewServerResource() resource.Resource {
@@ -177,6 +179,14 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"send_version_mismatch_alerts": schema.BoolAttribute{
+				Description: "Whether to send alerts when the server's Periphery version does not match Core. When unset, Komodo's own default (true) applies.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"cpu_warning": schema.Float64Attribute{
 				Description: "CPU warning threshold percentage.",
 				Optional:    true,
@@ -259,6 +269,10 @@ func serverConfigFromModel(ctx context.Context, m *ServerResourceModel) client.S
 		MemCritical:           client.Float64Ptr(m.MemCritical.ValueFloat64()),
 		DiskWarning:           client.Float64Ptr(m.DiskWarning.ValueFloat64()),
 		DiskCritical:          client.Float64Ptr(m.DiskCritical.ValueFloat64()),
+	}
+	// Left unset (nil) when not configured so Komodo keeps its own default.
+	if !m.SendVersionMismatchAlerts.IsNull() && !m.SendVersionMismatchAlerts.IsUnknown() {
+		cfg.SendVersionMismatchAlerts = client.BoolPtr(m.SendVersionMismatchAlerts.ValueBool())
 	}
 	if !m.IgnoreMounts.IsNull() && !m.IgnoreMounts.IsUnknown() {
 		var v []string
@@ -443,6 +457,11 @@ func mapServerToModel(ctx context.Context, c *client.Client, s *client.Server, m
 	}
 	if s.Config.SendDiskAlerts != nil {
 		m.SendDiskAlerts = types.BoolValue(*s.Config.SendDiskAlerts)
+	}
+	if s.Config.SendVersionMismatchAlerts != nil {
+		m.SendVersionMismatchAlerts = types.BoolValue(*s.Config.SendVersionMismatchAlerts)
+	} else if m.SendVersionMismatchAlerts.IsUnknown() {
+		m.SendVersionMismatchAlerts = types.BoolNull()
 	}
 	if s.Config.CPUWarning != nil {
 		m.CPUWarning = types.Float64Value(*s.Config.CPUWarning)
