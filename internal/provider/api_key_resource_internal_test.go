@@ -26,6 +26,7 @@ func TestApiKeyExpiresReplacement(t *testing.T) {
 		wantReplace bool
 	}{
 		{"state from before the attribute", types.Int64Null(), types.Int64Value(0), false},
+		{"old key given a real expiry", types.Int64Null(), types.Int64Value(4102444800000), true},
 		{"unchanged", types.Int64Value(0), types.Int64Value(0), false},
 		{"expiry added", types.Int64Value(0), types.Int64Value(4102444800000), true},
 		{"expiry removed", types.Int64Value(4102444800000), types.Int64Value(0), true},

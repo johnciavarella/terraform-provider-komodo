@@ -69,11 +69,17 @@ func (r *ApiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Default:     int64default.StaticInt64(0),
 				PlanModifiers: []planmodifier.Int64{
 					// Keys created before this attribute existed have no
-					// expires in state. Adopting the default for them must
-					// not replace the key (and so rotate its secret).
+					// expires in state, and were created without an expiry.
+					// Adopting the default (0) for them must not replace the
+					// key (and so rotate its secret); asking for a real
+					// expiry must, since an existing key cannot be changed.
 					int64planmodifier.RequiresReplaceIf(
 						func(_ context.Context, req planmodifier.Int64Request, resp *int64planmodifier.RequiresReplaceIfFuncResponse) {
-							resp.RequiresReplace = !req.StateValue.IsNull() && !req.PlanValue.Equal(req.StateValue)
+							if req.StateValue.IsNull() {
+								resp.RequiresReplace = !req.PlanValue.IsUnknown() && req.PlanValue.ValueInt64() != 0
+								return
+							}
+							resp.RequiresReplace = !req.PlanValue.Equal(req.StateValue)
 						},
 						"Replaces the key when expires changes.",
 						"Replaces the key when expires changes.",
