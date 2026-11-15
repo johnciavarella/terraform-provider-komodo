@@ -22,7 +22,7 @@ func TestProviderSchemaValid(t *testing.T) {
 	for _, d := range resp.Diagnostics {
 		t.Errorf("schema diagnostic: %s: %s", d.Summary, d.Detail)
 	}
-	for _, name := range []string{"komodo_variable", "komodo_alerter"} {
+	for _, name := range []string{"komodo_variable", "komodo_alerter", "komodo_procedure"} {
 		if _, ok := resp.ResourceSchemas[name]; !ok {
 			t.Errorf("resource %s is not registered", name)
 		}

@@ -309,3 +309,54 @@ resource "komodo_alerter" "test" {
 }
 `, name, endpointType, url, alertTypes)
 }
+
+func TestAccProcedureResource_basic(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-test")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProcedureResourceConfig(rName, 1000),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("komodo_procedure.test", "id"),
+					resource.TestCheckResourceAttr("komodo_procedure.test", "name", rName),
+					resource.TestCheckResourceAttr("komodo_procedure.test", "stages.#", "1"),
+					resource.TestCheckResourceAttr("komodo_procedure.test", "stages.0.executions.0.type", "Sleep"),
+					resource.TestCheckResourceAttr("komodo_procedure.test", "schedule_format", "Cron"),
+				),
+			},
+			{
+				Config: testAccProcedureResourceConfig(rName, 2000),
+				Check:  resource.TestCheckResourceAttr("komodo_procedure.test", "stages.0.executions.0.params", `{"duration_ms":2000}`),
+			},
+			{
+				ResourceName:      "komodo_procedure.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				// Komodo's stored params can differ in form from the configured JSON.
+				ImportStateVerifyIgnore: []string{"stages"},
+			},
+		},
+	})
+}
+
+// The schedule is disabled so the test procedure never runs by itself.
+func testAccProcedureResourceConfig(name string, sleepMs int) string {
+	return fmt.Sprintf(`
+resource "komodo_procedure" "test" {
+  name             = %[1]q
+  schedule_format  = "Cron"
+  schedule         = "0 0 3 * * ?"
+  schedule_enabled = false
+
+  stages = [{
+    name = "wait"
+    executions = [{
+      type   = "Sleep"
+      params = jsonencode({ duration_ms = %[2]d })
+    }]
+  }]
+}
+`, name, sleepMs)
+}

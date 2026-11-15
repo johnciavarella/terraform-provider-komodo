@@ -791,3 +791,85 @@ func (d *AlerterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
+
+// ---- Procedure data source ----
+
+var _ datasource.DataSource = &ProcedureDataSource{}
+
+type ProcedureDataSource struct{ client *client.Client }
+
+type ProcedureDataSourceModel struct {
+	ID               types.String `tfsdk:"id"`
+	Name             types.String `tfsdk:"name"`
+	ScheduleFormat   types.String `tfsdk:"schedule_format"`
+	Schedule         types.String `tfsdk:"schedule"`
+	ScheduleEnabled  types.Bool   `tfsdk:"schedule_enabled"`
+	ScheduleTimezone types.String `tfsdk:"schedule_timezone"`
+	WebhookEnabled   types.Bool   `tfsdk:"webhook_enabled"`
+	StageNames       types.List   `tfsdk:"stage_names"`
+}
+
+func NewProcedureDataSource() datasource.DataSource { return &ProcedureDataSource{} }
+
+func (d *ProcedureDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_procedure"
+}
+
+func (d *ProcedureDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetches a Komodo procedure by ID or name.",
+		Attributes: map[string]schema.Attribute{
+			"id":                schema.StringAttribute{Required: true, Description: "Procedure ID or name."},
+			"name":              schema.StringAttribute{Computed: true},
+			"schedule_format":   schema.StringAttribute{Computed: true, Description: "English or Cron."},
+			"schedule":          schema.StringAttribute{Computed: true, Description: "Schedule expression. Empty when the procedure has no schedule."},
+			"schedule_enabled":  schema.BoolAttribute{Computed: true},
+			"schedule_timezone": schema.StringAttribute{Computed: true},
+			"webhook_enabled":   schema.BoolAttribute{Computed: true},
+			"stage_names":       schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Names of the procedure's stages, in run order."},
+		},
+	}
+}
+
+func (d *ProcedureDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *client.Client, got: %T", req.ProviderData))
+		return
+	}
+	d.client = c
+}
+
+func (d *ProcedureDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config ProcedureDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	procedure, err := d.client.GetProcedure(ctx, config.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading procedure", err.Error())
+		return
+	}
+
+	config.ID = types.StringValue(procedure.ID)
+	config.Name = types.StringValue(procedure.Name)
+	config.ScheduleFormat = types.StringValue(procedure.Config.ScheduleFormat)
+	config.Schedule = types.StringValue(procedure.Config.Schedule)
+	config.ScheduleEnabled = types.BoolValue(procedure.Config.ScheduleEnabled)
+	config.ScheduleTimezone = types.StringValue(procedure.Config.ScheduleTimezone)
+	config.WebhookEnabled = types.BoolValue(procedure.Config.WebhookEnabled)
+	names := make([]string, 0, len(procedure.Config.Stages))
+	for _, s := range procedure.Config.Stages {
+		names = append(names, s.Name)
+	}
+	list, diags := types.ListValueFrom(ctx, types.StringType, names)
+	resp.Diagnostics.Append(diags...)
+	config.StageNames = list
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}

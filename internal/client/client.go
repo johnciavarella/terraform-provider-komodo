@@ -1597,3 +1597,130 @@ func (c *Client) RenameAlerter(ctx context.Context, id, name string) error {
 func (c *Client) DeleteAlerter(ctx context.Context, id string) error {
 	return c.Write(ctx, "DeleteAlerter", IDParam{ID: id}, nil)
 }
+
+// ---- Procedure ----
+
+// Execution is an adjacently-tagged enum on the wire:
+//
+//	{"type": "DeployStack", "params": {"stack": "..."}}
+//
+// Params is kept as raw JSON because every execution type has its own shape.
+type Execution struct {
+	Type   string          `json:"type"`
+	Params json.RawMessage `json:"params"`
+}
+
+type EnabledExecution struct {
+	Execution Execution `json:"execution"`
+	Enabled   bool      `json:"enabled"`
+}
+
+// ProcedureStage is a group of executions that run in parallel. Stages run
+// one after another.
+type ProcedureStage struct {
+	Name       string             `json:"name"`
+	Enabled    bool               `json:"enabled"`
+	Executions []EnabledExecution `json:"executions"`
+}
+
+// ProcedureConfig is sent in full on create and update.
+type ProcedureConfig struct {
+	Stages           []ProcedureStage `json:"stages"`
+	ScheduleFormat   string           `json:"schedule_format"`
+	Schedule         string           `json:"schedule"`
+	ScheduleEnabled  bool             `json:"schedule_enabled"`
+	ScheduleTimezone string           `json:"schedule_timezone"`
+	ScheduleAlert    bool             `json:"schedule_alert"`
+	FailureAlert     bool             `json:"failure_alert"`
+	WebhookEnabled   bool             `json:"webhook_enabled"`
+	WebhookSecret    string           `json:"webhook_secret"`
+}
+
+// normalize makes nil slices and empty params marshal as [] and {}.
+func (c *ProcedureConfig) normalize() {
+	if c.Stages == nil {
+		c.Stages = []ProcedureStage{}
+	}
+	for i := range c.Stages {
+		if c.Stages[i].Executions == nil {
+			c.Stages[i].Executions = []EnabledExecution{}
+		}
+		for j := range c.Stages[i].Executions {
+			if len(c.Stages[i].Executions[j].Execution.Params) == 0 {
+				c.Stages[i].Executions[j].Execution.Params = json.RawMessage(`{}`)
+			}
+		}
+	}
+}
+
+// CanonicalStagesJSON renders stages as JSON with object keys sorted, so two
+// values can be compared regardless of key order or whitespace in params.
+func CanonicalStagesJSON(stages []ProcedureStage) ([]byte, error) {
+	cfg := ProcedureConfig{Stages: stages}
+	cfg.normalize()
+	raw, err := json.Marshal(cfg.Stages)
+	if err != nil {
+		return nil, err
+	}
+	var generic interface{}
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, err
+	}
+	return json.Marshal(generic)
+}
+
+type Procedure struct {
+	ID     string          `json:"-"`
+	Name   string          `json:"name"`
+	Tags   []string        `json:"tags,omitempty"`
+	Config ProcedureConfig `json:"config"`
+}
+
+func (p *Procedure) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		ID     json.RawMessage `json:"_id"`
+		Name   string          `json:"name"`
+		Tags   []string        `json:"tags,omitempty"`
+		Config ProcedureConfig `json:"config"`
+	}
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	p.ID = parseMongoID(a.ID)
+	p.Name = a.Name
+	p.Tags = a.Tags
+	p.Config = a.Config
+	return nil
+}
+
+func (c *Client) CreateProcedure(ctx context.Context, name string, config ProcedureConfig) (*Procedure, error) {
+	config.normalize()
+	var p Procedure
+	err := c.Write(ctx, "CreateProcedure", map[string]interface{}{"name": name, "config": config}, &p)
+	return &p, err
+}
+
+func (c *Client) GetProcedure(ctx context.Context, idOrName string) (*Procedure, error) {
+	if idOrName == "" {
+		return nil, &NotFoundError{Message: "procedure identifier is empty"}
+	}
+	var p Procedure
+	err := c.Read(ctx, "GetProcedure", map[string]string{"procedure": idOrName}, &p)
+	return &p, err
+}
+
+func (c *Client) UpdateProcedure(ctx context.Context, id string, config ProcedureConfig) (*Procedure, error) {
+	config.normalize()
+	var p Procedure
+	err := c.Write(ctx, "UpdateProcedure", map[string]interface{}{"id": id, "config": config}, &p)
+	return &p, err
+}
+
+func (c *Client) RenameProcedure(ctx context.Context, id, name string) error {
+	return c.Write(ctx, "RenameProcedure", map[string]string{"id": id, "name": name}, nil)
+}
+
+func (c *Client) DeleteProcedure(ctx context.Context, id string) error {
+	return c.Write(ctx, "DeleteProcedure", IDParam{ID: id}, nil)
+}
