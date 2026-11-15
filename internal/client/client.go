@@ -587,8 +587,31 @@ type ImageRegistryConfig struct {
 	Organization string `json:"organization"`
 }
 
+// BuildVersion is the build's semantic version. Komodo serializes it as an
+// object and accepts either that object or a "major.minor.patch" string.
+type BuildVersion struct {
+	Major int `json:"major"`
+	Minor int `json:"minor"`
+	Patch int `json:"patch"`
+}
+
+func (v BuildVersion) String() string {
+	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
+}
+
+// ParseBuildVersion parses a "major.minor.patch" string.
+func ParseBuildVersion(s string) (*BuildVersion, error) {
+	var v BuildVersion
+	var extra string
+	if n, _ := fmt.Sscanf(s, "%d.%d.%d%s", &v.Major, &v.Minor, &v.Patch, &extra); n != 3 || v.Major < 0 || v.Minor < 0 || v.Patch < 0 {
+		return nil, fmt.Errorf("invalid version %q: expected major.minor.patch, e.g. 1.2.3", s)
+	}
+	return &v, nil
+}
+
 type BuildConfig struct {
 	BuilderID            string                `json:"builder_id,omitempty"`
+	Version              *BuildVersion         `json:"version,omitempty"`
 	ImageName            string                `json:"image_name,omitempty"`
 	ImageTag             string                `json:"image_tag,omitempty"`
 	AutoIncrementVersion *bool                 `json:"auto_increment_version,omitempty"`

@@ -58,6 +58,7 @@ resource "komodo_build" "api" {
 - `commit` (String) Specific commit hash.
 - `dockerfile` (String) Inline Dockerfile contents (alternative to dockerfile_path).
 - `dockerfile_path` (String) Path to Dockerfile. Komodo defaults this to "Dockerfile" if empty.
+- `extra_args` (List of String) Extra docker CLI arguments to include in the build command.
 - `files_on_host` (Boolean) Source files from host.
 - `git_account` (String) Git account for private repos.
 - `git_https` (Boolean) Use HTTPS to clone.
@@ -74,9 +75,11 @@ resource "komodo_build" "api" {
 - `pre_build_command` (String) Command to run before docker build.
 - `pre_build_path` (String) Working directory for the pre-build command.
 - `repo` (String) Git repository (namespace/repo_name).
+- `secret_args` (String, Sensitive) Secret build arguments, newline-separated KEY=value. Passed with docker secret mounts so they are not visible in the final image, unlike build_args.
 - `skip_secret_interp` (Boolean) Skip Komodo variable / secret interpolation in build_args.
 - `tags` (List of String) List of tag names to apply to this build.
 - `use_buildx` (Boolean) Use docker buildx.
+- `version` (String) Current build version as major.minor.patch (e.g. "1.2.3"). Komodo bumps the patch on every build while auto_increment_version is true, so only set this together with auto_increment_version = false.
 - `webhook_enabled` (Boolean) Enable webhooks.
 - `webhook_secret` (String, Sensitive) Alternate webhook secret for this build.
 
