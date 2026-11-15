@@ -21,3 +21,25 @@
 ._*
 .Spotlight-V100
 .Trashes
+
+# Terraform state, vars and working dirs (may contain secrets)
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+crash.log
+
+# Go build/test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# IDE / tooling
+.vscode/
+.idea/
+.claude
