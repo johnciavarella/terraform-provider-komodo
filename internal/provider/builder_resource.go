@@ -51,7 +51,7 @@ func (r *BuilderResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name":        schema.StringAttribute{Required: true, Description: "Display name."},
-			"server_id":   schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Server used for building (ID or name)."},
+			"server_id":   schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Server used for building (ID or name). If the builder has several servers in Komodo, this is the first; changing it replaces the whole list with the one server."},
 			"description": metaDescriptionAttribute(),
 			"template":    metaTemplateAttribute(),
 			"tags":        schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this builder."},
@@ -148,10 +148,20 @@ func (r *BuilderResource) Update(ctx context.Context, req resource.UpdateRequest
 		}
 	}
 
-	builder, err := r.client.UpdateBuilder(ctx, client.UpdateBuilderParams{
-		ID:     state.ID.ValueString(),
-		Config: client.BuilderConfig{ServerID: resolveServerID(ctx, r.client, plan.ServerID.ValueString())},
-	})
+	// The config is only sent when server_id changes. A Server builder can
+	// hold several servers in Komodo, of which this resource manages the
+	// first; resending server_id on a rename or tag change would drop the
+	// others.
+	var builder *client.Builder
+	var err error
+	if plan.ServerID.Equal(state.ServerID) {
+		builder, err = r.client.GetBuilder(ctx, state.ID.ValueString())
+	} else {
+		builder, err = r.client.UpdateBuilder(ctx, client.UpdateBuilderParams{
+			ID:     state.ID.ValueString(),
+			Config: client.BuilderConfig{ServerID: resolveServerID(ctx, r.client, plan.ServerID.ValueString())},
+		})
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating builder", err.Error())
 		return

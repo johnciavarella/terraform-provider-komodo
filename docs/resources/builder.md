@@ -29,7 +29,7 @@ resource "komodo_builder" "default" {
 ### Optional
 
 - `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
-- `server_id` (String) Server used for building (ID or name).
+- `server_id` (String) Server used for building (ID or name). If the builder has several servers in Komodo, this is the first; changing it replaces the whole list with the one server.
 - `tags` (List of String) List of tag names to apply to this builder.
 - `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 
