@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -41,9 +42,10 @@ func (m useStateForUnknownIncludingNull) PlanModifyList(_ context.Context, req p
 }
 
 var (
-	_ resource.Resource                = &StackResource{}
-	_ resource.ResourceWithImportState = &StackResource{}
-	_ resource.ResourceWithModifyPlan  = &StackResource{}
+	_ resource.Resource                   = &StackResource{}
+	_ resource.ResourceWithImportState    = &StackResource{}
+	_ resource.ResourceWithValidateConfig = &StackResource{}
+	_ resource.ResourceWithModifyPlan     = &StackResource{}
 )
 
 type StackResource struct {
@@ -94,10 +96,14 @@ type StackResourceModel struct {
 	ComposeCmdWrapper        types.String `tfsdk:"compose_cmd_wrapper"`
 	ComposeCmdWrapperInclude types.List   `tfsdk:"compose_cmd_wrapper_include"`
 	IgnoreServices           types.List   `tfsdk:"ignore_services"`
+	AutoUpdateSkipServices   types.List   `tfsdk:"auto_update_skip_services"`
+	ConfigFiles              types.List   `tfsdk:"config_files"`
 	SendAlerts               types.Bool   `tfsdk:"send_alerts"`
 	Started                  types.Bool   `tfsdk:"started"`
 	Deployed                 types.Bool   `tfsdk:"deployed"`
 	Tags                     types.List   `tfsdk:"tags"`
+	Description              types.String `tfsdk:"description"`
+	Template                 types.Bool   `tfsdk:"template"`
 }
 
 // additionalEnvFileObjectType is the Terraform object type for entries in
@@ -107,6 +113,16 @@ var additionalEnvFileObjectType = types.ObjectType{
 	AttrTypes: map[string]attr.Type{
 		"path":  types.StringType,
 		"track": types.BoolType,
+	},
+}
+
+// stackConfigFileObjectType is the Terraform object type for entries in
+// `config_files`.
+var stackConfigFileObjectType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"path":     types.StringType,
+		"services": types.ListType{ElemType: types.StringType},
+		"requires": types.StringType,
 	},
 }
 
@@ -400,6 +416,29 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					useStateForUnknownIncludingNull{},
 				},
 			},
+			"auto_update_skip_services": schema.ListAttribute{
+				Description: "Services left out of the global auto-update. Manual update checks still include them. Leave it out and Terraform does not manage the list; set it to [] to clear it.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
+			"config_files": schema.ListNestedAttribute{
+				Description: "Extra files, besides the compose and env files, that Komodo tracks for this stack. A change to one counts as a change in DeployStackIfChanged. Env files passed with --env-file belong in additional_env_files instead. Leave it out and Terraform does not manage the list; set it to [] to clear it.",
+				Optional:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"path": schema.StringAttribute{Required: true, Description: "Path of the file, relative to run_directory."},
+						"services": schema.ListAttribute{
+							Optional: true, Computed: true, ElementType: types.StringType,
+							Default:     listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
+							Description: "Services that depend on the file. Empty means all services.",
+						},
+						"requires": schema.StringAttribute{
+							Optional: true, Computed: true, Default: stringdefault.StaticString("None"),
+							Description: "What a change to the file requires: \"Redeploy\", \"Restart\" or \"None\" (the default: track the file but take no action).",
+						},
+					},
+				},
+			},
 			"send_alerts": schema.BoolAttribute{
 				Description: "Whether to send StackStateChange alerts.",
 				Optional:    true,
@@ -418,6 +457,8 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
 			"tags": schema.ListAttribute{
 				Description: "List of tag names to apply to this stack.",
 				Optional:    true,
@@ -425,6 +466,33 @@ func (r *StackResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				ElementType: types.StringType,
 			},
 		},
+	}
+}
+
+// ValidateConfig checks config_files[*].requires. Komodo also accepts
+// lower-case spellings but stores the canonical one, which would leave the
+// applied value different from the configured one.
+func (r *StackResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var files types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("config_files"), &files)...)
+	if files.IsNull() || files.IsUnknown() {
+		return
+	}
+	for i, v := range files.Elements() {
+		obj, ok := v.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		requires, ok := obj.Attributes()["requires"].(types.String)
+		if !ok || requires.IsNull() || requires.IsUnknown() {
+			continue
+		}
+		switch requires.ValueString() {
+		case "Redeploy", "Restart", "None":
+		default:
+			resp.Diagnostics.AddAttributeError(path.Root("config_files").AtListIndex(i).AtName("requires"), "Invalid requires value",
+				fmt.Sprintf("%q is not one of: Redeploy, Restart, None.", requires.ValueString()))
+		}
 	}
 }
 
@@ -535,6 +603,31 @@ func stackConfigFromModel(ctx context.Context, m *StackResourceModel) client.Sta
 		cfg.IgnoreServices = v
 	}
 
+	// Null or unknown means "not managed": nothing is sent and Komodo keeps
+	// what it has. An explicit empty list is sent and clears the field.
+	if !m.AutoUpdateSkipServices.IsNull() && !m.AutoUpdateSkipServices.IsUnknown() {
+		v := []string{}
+		m.AutoUpdateSkipServices.ElementsAs(ctx, &v, false)
+		cfg.AutoUpdateSkipServices = &v
+	}
+	if !m.ConfigFiles.IsNull() && !m.ConfigFiles.IsUnknown() {
+		var rows []struct {
+			Path     types.String `tfsdk:"path"`
+			Services types.List   `tfsdk:"services"`
+			Requires types.String `tfsdk:"requires"`
+		}
+		m.ConfigFiles.ElementsAs(ctx, &rows, false)
+		out := make([]client.StackFileDependency, 0, len(rows))
+		for _, r := range rows {
+			dep := client.StackFileDependency{Path: r.Path.ValueString(), Requires: r.Requires.ValueString()}
+			if !r.Services.IsNull() && !r.Services.IsUnknown() {
+				r.Services.ElementsAs(ctx, &dep.Services, false)
+			}
+			out = append(out, dep)
+		}
+		cfg.ConfigFiles = &out
+	}
+
 	if m.PreDeployCommand.ValueString() != "" {
 		cfg.PreDeploy = &client.SystemCommand{
 			Path:    m.PreDeployPath.ValueString(),
@@ -614,6 +707,41 @@ func mapAdditionalEnvFilesToModel(ctx context.Context, vals []client.AdditionalE
 	return list
 }
 
+// mapStackConfigFilesToModel converts Komodo's config_files to the Terraform
+// list-of-objects shape, but only while the attribute is managed (non-null in
+// the model). A null attribute stays null whatever Komodo holds.
+func mapStackConfigFilesToModel(vals *[]client.StackFileDependency, current types.List) types.List {
+	if current.IsNull() || current.IsUnknown() {
+		return types.ListNull(stackConfigFileObjectType)
+	}
+	if vals == nil || len(*vals) == 0 {
+		return types.ListValueMust(stackConfigFileObjectType, []attr.Value{})
+	}
+	objs := make([]attr.Value, 0, len(*vals))
+	for _, v := range *vals {
+		services := v.Services
+		if services == nil {
+			services = []string{}
+		}
+		svcList, _ := types.ListValueFrom(context.Background(), types.StringType, services)
+		requires := v.Requires
+		if requires == "" {
+			requires = "None" // Komodo omits the default
+		}
+		o, diags := types.ObjectValue(stackConfigFileObjectType.AttrTypes, map[string]attr.Value{
+			"path":     types.StringValue(v.Path),
+			"services": svcList,
+			"requires": types.StringValue(requires),
+		})
+		if diags.HasError() {
+			continue
+		}
+		objs = append(objs, o)
+	}
+	list, _ := types.ListValue(stackConfigFileObjectType, objs)
+	return list
+}
+
 func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *StackResourceModel) {
 	m.ID = types.StringValue(s.ID)
 	m.Name = types.StringValue(s.Name)
@@ -643,6 +771,15 @@ func mapStackToModel(ctx context.Context, c *client.Client, s *client.Stack, m *
 	m.BuildExtraArgs = mapListToModel(s.Config.BuildExtraArgs, m.BuildExtraArgs)
 	m.ComposeCmdWrapperInclude = mapListToModel(s.Config.ComposeCmdWrapperInclude, m.ComposeCmdWrapperInclude)
 	m.IgnoreServices = mapListToModel(s.Config.IgnoreServices, m.IgnoreServices)
+	// Unmanaged (null) stays null; otherwise show what Komodo has.
+	if m.AutoUpdateSkipServices.IsNull() || m.AutoUpdateSkipServices.IsUnknown() {
+		m.AutoUpdateSkipServices = types.ListNull(types.StringType)
+	} else if s.Config.AutoUpdateSkipServices != nil && len(*s.Config.AutoUpdateSkipServices) > 0 {
+		m.AutoUpdateSkipServices, _ = types.ListValueFrom(ctx, types.StringType, *s.Config.AutoUpdateSkipServices)
+	} else {
+		m.AutoUpdateSkipServices = types.ListValueMust(types.StringType, []attr.Value{})
+	}
+	m.ConfigFiles = mapStackConfigFilesToModel(s.Config.ConfigFiles, m.ConfigFiles)
 	m.AdditionalEnvFiles = mapAdditionalEnvFilesToModel(ctx, s.Config.AdditionalEnvFiles, m.AdditionalEnvFiles)
 
 	if s.Config.AutoPull != nil {
@@ -722,6 +859,7 @@ func (r *StackResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tagsFromPlan := plan.Tags
 	mapStackToModel(ctx, r.client, stack, &plan)
 	applyResourceTags(ctx, r.client, "Stack", stack.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Stack", stack.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -772,6 +910,7 @@ func (r *StackResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	// `started` is an intent attribute — leave it as whatever is in state.
 	// StartStack/StopStack are async so reading container state immediately
 	// after would race. Drift is surfaced the next time apply is run.
+	readResourceMeta(ctx, r.client, "Stack", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -816,6 +955,7 @@ func (r *StackResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tagsFromPlan := plan.Tags
 	mapStackToModel(ctx, r.client, stack, &plan)
 	applyResourceTags(ctx, r.client, "Stack", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Stack", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -182,6 +183,21 @@ type Resource struct {
 
 // ---- Server ----
 
+// MaintenanceWindow is a scheduled period during which alerts are suppressed.
+// ScheduleType is "Daily", "Weekly" or "OneTime".
+type MaintenanceWindow struct {
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	ScheduleType    string `json:"schedule_type"`
+	DayOfWeek       string `json:"day_of_week"`
+	Date            string `json:"date"`
+	Hour            int    `json:"hour"`
+	Minute          int    `json:"minute"`
+	DurationMinutes int    `json:"duration_minutes"`
+	Timezone        string `json:"timezone"`
+	Enabled         bool   `json:"enabled"`
+}
+
 type ServerConfig struct {
 	Address                   string   `json:"address,omitempty"`
 	ExternalAddress           string   `json:"external_address,omitempty"`
@@ -199,12 +215,14 @@ type ServerConfig struct {
 	SendMemAlerts             *bool    `json:"send_mem_alerts,omitempty"`
 	SendDiskAlerts            *bool    `json:"send_disk_alerts,omitempty"`
 	SendVersionMismatchAlerts *bool    `json:"send_version_mismatch_alerts,omitempty"`
-	CPUWarning                *float64 `json:"cpu_warning,omitempty"`
-	CPUCritical               *float64 `json:"cpu_critical,omitempty"`
-	MemWarning                *float64 `json:"mem_warning,omitempty"`
-	MemCritical               *float64 `json:"mem_critical,omitempty"`
-	DiskWarning               *float64 `json:"disk_warning,omitempty"`
-	DiskCritical              *float64 `json:"disk_critical,omitempty"`
+	// Pointer to a slice: nil leaves the windows alone, empty clears them.
+	MaintenanceWindows *[]MaintenanceWindow `json:"maintenance_windows,omitempty"`
+	CPUWarning         *float64             `json:"cpu_warning,omitempty"`
+	CPUCritical        *float64             `json:"cpu_critical,omitempty"`
+	MemWarning         *float64             `json:"mem_warning,omitempty"`
+	MemCritical        *float64             `json:"mem_critical,omitempty"`
+	DiskWarning        *float64             `json:"disk_warning,omitempty"`
+	DiskCritical       *float64             `json:"disk_critical,omitempty"`
 }
 
 type Server struct {
@@ -331,6 +349,15 @@ func (a *AdditionalEnvFile) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// StackFileDependency is an extra file Komodo tracks for a stack. A change to
+// it counts as a stack change in DeployStackIfChanged. Requires is one of
+// "Redeploy", "Restart" or "None"; Komodo omits it when it is "None".
+type StackFileDependency struct {
+	Path     string   `json:"path"`
+	Services []string `json:"services,omitempty"`
+	Requires string   `json:"requires,omitempty"`
+}
+
 type StackConfig struct {
 	ServerID                 string              `json:"server_id,omitempty"`
 	SwarmID                  string              `json:"swarm_id,omitempty"`
@@ -371,7 +398,10 @@ type StackConfig struct {
 	ComposeCmdWrapper        string              `json:"compose_cmd_wrapper,omitempty"`
 	ComposeCmdWrapperInclude []string            `json:"compose_cmd_wrapper_include,omitempty"`
 	IgnoreServices           []string            `json:"ignore_services,omitempty"`
-	SendAlerts               *bool               `json:"send_alerts,omitempty"`
+	// Pointers to slices: nil leaves the field alone, an empty slice clears it.
+	AutoUpdateSkipServices *[]string              `json:"auto_update_skip_services,omitempty"`
+	ConfigFiles            *[]StackFileDependency `json:"config_files,omitempty"`
+	SendAlerts             *bool                  `json:"send_alerts,omitempty"`
 }
 
 type Stack struct {
@@ -491,6 +521,7 @@ type DeploymentImageParams struct {
 type DeploymentConfig struct {
 	ServerID             string          `json:"server_id,omitempty"`
 	SwarmID              string          `json:"swarm_id,omitempty"`
+	CustomName           *string         `json:"custom_name,omitempty"`
 	Image                DeploymentImage `json:"image"`
 	ImageRegistryAccount string          `json:"image_registry_account,omitempty"`
 	SkipSecretInterp     *bool           `json:"skip_secret_interp,omitempty"`
@@ -587,8 +618,31 @@ type ImageRegistryConfig struct {
 	Organization string `json:"organization"`
 }
 
+// BuildVersion is the build's semantic version. Komodo serializes it as an
+// object and accepts either that object or a "major.minor.patch" string.
+type BuildVersion struct {
+	Major int `json:"major"`
+	Minor int `json:"minor"`
+	Patch int `json:"patch"`
+}
+
+func (v BuildVersion) String() string {
+	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
+}
+
+// ParseBuildVersion parses a "major.minor.patch" string.
+func ParseBuildVersion(s string) (*BuildVersion, error) {
+	var v BuildVersion
+	var extra string
+	if n, _ := fmt.Sscanf(s, "%d.%d.%d%s", &v.Major, &v.Minor, &v.Patch, &extra); n != 3 || v.Major < 0 || v.Minor < 0 || v.Patch < 0 {
+		return nil, fmt.Errorf("invalid version %q: expected major.minor.patch, e.g. 1.2.3", s)
+	}
+	return &v, nil
+}
+
 type BuildConfig struct {
 	BuilderID            string                `json:"builder_id,omitempty"`
+	Version              *BuildVersion         `json:"version,omitempty"`
 	ImageName            string                `json:"image_name,omitempty"`
 	ImageTag             string                `json:"image_tag,omitempty"`
 	AutoIncrementVersion *bool                 `json:"auto_increment_version,omitempty"`
@@ -612,10 +666,10 @@ type BuildConfig struct {
 	ImageRegistry        []ImageRegistryConfig `json:"image_registry,omitempty"`
 	SkipSecretInterp     *bool                 `json:"skip_secret_interp,omitempty"`
 	UseBuildx            *bool                 `json:"use_buildx,omitempty"`
-	ExtraArgs            []string              `json:"extra_args,omitempty"`
+	ExtraArgs            *[]string             `json:"extra_args,omitempty"`
 	PreBuild             *SystemCommand        `json:"pre_build,omitempty"`
 	BuildArgs            string                `json:"build_args,omitempty"`
-	SecretArgs           string                `json:"secret_args,omitempty"`
+	SecretArgs           *string               `json:"secret_args,omitempty"`
 	Labels               string                `json:"labels,omitempty"`
 }
 
@@ -844,6 +898,33 @@ func (c *Client) UpdateResourceMeta(ctx context.Context, targetType, id string, 
 	}, nil)
 }
 
+// ResourceMeta is the description and template flag every Komodo resource
+// carries alongside its tags.
+type ResourceMeta struct {
+	Description string `json:"description"`
+	Template    bool   `json:"template"`
+}
+
+// UpdateResourceMetaFields sets a resource's description and/or template
+// flag. A nil argument leaves that field as it is. Tags are not touched.
+func (c *Client) UpdateResourceMetaFields(ctx context.Context, targetType, id string, description *string, template *bool) error {
+	params := struct {
+		Target      ResourceTarget `json:"target"`
+		Description *string        `json:"description,omitempty"`
+		Template    *bool          `json:"template,omitempty"`
+	}{Target: ResourceTarget{Type: targetType, ID: id}, Description: description, Template: template}
+	return c.Write(ctx, "UpdateResourceMeta", params, nil)
+}
+
+// GetResourceMeta reads the description and template flag of a resource of
+// the given type ("Server", "Stack", ...) by ID or name.
+func (c *Client) GetResourceMeta(ctx context.Context, targetType, idOrName string) (*ResourceMeta, error) {
+	var m ResourceMeta
+	key := strings.ToLower(targetType)
+	err := c.Read(ctx, "Get"+targetType, map[string]string{key: idOrName}, &m)
+	return &m, err
+}
+
 // ---- Builder ----
 
 // BuilderConfig is an adjacently-tagged enum on the wire:
@@ -873,10 +954,14 @@ func (c BuilderConfig) MarshalJSON() ([]byte, error) {
 }
 
 func (c *BuilderConfig) UnmarshalJSON(data []byte) error {
+	// Newer Komodo returns a Server builder's servers as a `server_ids` list
+	// (builds overflow to later entries); older versions return a single
+	// `server_id`. Both are accepted on write. Read whichever is present.
 	var wrapper struct {
 		Type   string `json:"type"`
 		Params struct {
-			ServerID string `json:"server_id,omitempty"`
+			ServerID  string   `json:"server_id,omitempty"`
+			ServerIDs []string `json:"server_ids,omitempty"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
@@ -891,6 +976,9 @@ func (c *BuilderConfig) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	c.ServerID = wrapper.Params.ServerID
+	if c.ServerID == "" && len(wrapper.Params.ServerIDs) > 0 {
+		c.ServerID = wrapper.Params.ServerIDs[0]
+	}
 	return nil
 }
 
@@ -1041,11 +1129,14 @@ type ApiKeyResponse struct {
 	Secret string `json:"secret"`
 }
 
-func (c *Client) CreateApiKeyForServiceUser(ctx context.Context, userID, name string) (*ApiKeyResponse, error) {
+// CreateApiKeyForServiceUser creates a key. expires is a unix timestamp in
+// milliseconds; 0 means the key never expires.
+func (c *Client) CreateApiKeyForServiceUser(ctx context.Context, userID, name string, expires int64) (*ApiKeyResponse, error) {
 	var r ApiKeyResponse
-	err := c.Write(ctx, "CreateApiKeyForServiceUser", map[string]string{
+	err := c.Write(ctx, "CreateApiKeyForServiceUser", map[string]interface{}{
 		"user_id": userID,
 		"name":    name,
+		"expires": expires,
 	}, &r)
 	return &r, err
 }
@@ -1318,4 +1409,318 @@ func IntPtr(i int) *int {
 
 func StringPtr(s string) *string {
 	return &s
+}
+
+// ---- Variable ----
+
+// Variable is a global key/value that Komodo interpolates wherever
+// `[[NAME]]` appears in resource config. Variables are keyed by name and have
+// no separate ID.
+type Variable struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Value       string `json:"value"`
+	IsSecret    bool   `json:"is_secret"`
+}
+
+func (c *Client) CreateVariable(ctx context.Context, v Variable) (*Variable, error) {
+	var out Variable
+	err := c.Write(ctx, "CreateVariable", map[string]interface{}{
+		"name":        v.Name,
+		"value":       v.Value,
+		"description": v.Description,
+		"is_secret":   v.IsSecret,
+	}, &out)
+	return &out, err
+}
+
+func (c *Client) ListVariables(ctx context.Context) ([]Variable, error) {
+	var vars []Variable
+	err := c.Read(ctx, "ListVariables", struct{}{}, &vars)
+	return vars, err
+}
+
+// GetVariable looks the variable up in ListVariables rather than calling
+// GetVariable: Komodo answers a missing variable with a generic HTTP 500,
+// which cannot be told apart from a real server error (and would be retried).
+func (c *Client) GetVariable(ctx context.Context, name string) (*Variable, error) {
+	vars, err := c.ListVariables(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range vars {
+		if vars[i].Name == name {
+			return &vars[i], nil
+		}
+	}
+	return nil, &NotFoundError{Message: fmt.Sprintf("variable not found: %s", name)}
+}
+
+func (c *Client) UpdateVariableValue(ctx context.Context, name, value string) error {
+	return c.Write(ctx, "UpdateVariableValue", map[string]string{"name": name, "value": value}, nil)
+}
+
+func (c *Client) UpdateVariableDescription(ctx context.Context, name, description string) error {
+	return c.Write(ctx, "UpdateVariableDescription", map[string]string{"name": name, "description": description}, nil)
+}
+
+func (c *Client) UpdateVariableIsSecret(ctx context.Context, name string, isSecret bool) error {
+	return c.Write(ctx, "UpdateVariableIsSecret", map[string]interface{}{"name": name, "is_secret": isSecret}, nil)
+}
+
+func (c *Client) DeleteVariable(ctx context.Context, name string) error {
+	return c.Write(ctx, "DeleteVariable", map[string]string{"name": name}, nil)
+}
+
+// ---- Alerter ----
+
+// AlerterEndpoint is an adjacently-tagged enum on the wire:
+//
+//	{"type": "Slack", "params": {"url": "..."}}
+//
+// Type is one of Custom, Slack, Discord, Ntfy, Pushover. Email only applies
+// to Ntfy.
+type AlerterEndpoint struct {
+	Type  string
+	URL   string
+	Email string
+}
+
+type alerterEndpointParams struct {
+	URL   string  `json:"url"`
+	Email *string `json:"email,omitempty"`
+}
+
+type alerterEndpointWire struct {
+	Type   string                `json:"type"`
+	Params alerterEndpointParams `json:"params"`
+}
+
+func (e AlerterEndpoint) MarshalJSON() ([]byte, error) {
+	w := alerterEndpointWire{Type: e.Type, Params: alerterEndpointParams{URL: e.URL}}
+	if e.Type == "Ntfy" && e.Email != "" {
+		w.Params.Email = &e.Email
+	}
+	return json.Marshal(w)
+}
+
+func (e *AlerterEndpoint) UnmarshalJSON(data []byte) error {
+	var w alerterEndpointWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	e.Type = w.Type
+	e.URL = w.Params.URL
+	e.Email = ""
+	if w.Params.Email != nil {
+		e.Email = *w.Params.Email
+	}
+	return nil
+}
+
+// AlerterConfig is sent in full on create and update. The slices carry no
+// omitempty so that an empty list clears the filter in Komodo.
+type AlerterConfig struct {
+	Enabled         bool             `json:"enabled"`
+	Endpoint        AlerterEndpoint  `json:"endpoint"`
+	AlertTypes      []string         `json:"alert_types"`
+	Resources       []ResourceTarget `json:"resources"`
+	ExceptResources []ResourceTarget `json:"except_resources"`
+}
+
+// normalize replaces nil slices with empty ones so they marshal as [] and
+// not null.
+func (c *AlerterConfig) normalize() {
+	if c.AlertTypes == nil {
+		c.AlertTypes = []string{}
+	}
+	if c.Resources == nil {
+		c.Resources = []ResourceTarget{}
+	}
+	if c.ExceptResources == nil {
+		c.ExceptResources = []ResourceTarget{}
+	}
+}
+
+type Alerter struct {
+	ID     string        `json:"-"`
+	Name   string        `json:"name"`
+	Tags   []string      `json:"tags,omitempty"`
+	Config AlerterConfig `json:"config"`
+}
+
+func (a *Alerter) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		ID     json.RawMessage `json:"_id"`
+		Name   string          `json:"name"`
+		Tags   []string        `json:"tags,omitempty"`
+		Config AlerterConfig   `json:"config"`
+	}
+	var al alias
+	if err := json.Unmarshal(data, &al); err != nil {
+		return err
+	}
+	a.ID = parseMongoID(al.ID)
+	a.Name = al.Name
+	a.Tags = al.Tags
+	a.Config = al.Config
+	return nil
+}
+
+func (c *Client) CreateAlerter(ctx context.Context, name string, config AlerterConfig) (*Alerter, error) {
+	config.normalize()
+	var a Alerter
+	err := c.Write(ctx, "CreateAlerter", map[string]interface{}{"name": name, "config": config}, &a)
+	return &a, err
+}
+
+func (c *Client) GetAlerter(ctx context.Context, idOrName string) (*Alerter, error) {
+	if idOrName == "" {
+		return nil, &NotFoundError{Message: "alerter identifier is empty"}
+	}
+	var a Alerter
+	err := c.Read(ctx, "GetAlerter", map[string]string{"alerter": idOrName}, &a)
+	return &a, err
+}
+
+func (c *Client) UpdateAlerter(ctx context.Context, id string, config AlerterConfig) (*Alerter, error) {
+	config.normalize()
+	var a Alerter
+	err := c.Write(ctx, "UpdateAlerter", map[string]interface{}{"id": id, "config": config}, &a)
+	return &a, err
+}
+
+func (c *Client) RenameAlerter(ctx context.Context, id, name string) error {
+	return c.Write(ctx, "RenameAlerter", map[string]string{"id": id, "name": name}, nil)
+}
+
+func (c *Client) DeleteAlerter(ctx context.Context, id string) error {
+	return c.Write(ctx, "DeleteAlerter", IDParam{ID: id}, nil)
+}
+
+// ---- Procedure ----
+
+// Execution is an adjacently-tagged enum on the wire:
+//
+//	{"type": "DeployStack", "params": {"stack": "..."}}
+//
+// Params is kept as raw JSON because every execution type has its own shape.
+type Execution struct {
+	Type   string          `json:"type"`
+	Params json.RawMessage `json:"params"`
+}
+
+type EnabledExecution struct {
+	Execution Execution `json:"execution"`
+	Enabled   bool      `json:"enabled"`
+}
+
+// ProcedureStage is a group of executions that run in parallel. Stages run
+// one after another.
+type ProcedureStage struct {
+	Name       string             `json:"name"`
+	Enabled    bool               `json:"enabled"`
+	Executions []EnabledExecution `json:"executions"`
+}
+
+// ProcedureConfig is sent in full on create and update.
+type ProcedureConfig struct {
+	Stages           []ProcedureStage `json:"stages"`
+	ScheduleFormat   string           `json:"schedule_format"`
+	Schedule         string           `json:"schedule"`
+	ScheduleEnabled  bool             `json:"schedule_enabled"`
+	ScheduleTimezone string           `json:"schedule_timezone"`
+	ScheduleAlert    bool             `json:"schedule_alert"`
+	FailureAlert     bool             `json:"failure_alert"`
+	WebhookEnabled   bool             `json:"webhook_enabled"`
+	WebhookSecret    string           `json:"webhook_secret"`
+}
+
+// normalize makes nil slices and empty params marshal as [] and {}.
+func (c *ProcedureConfig) normalize() {
+	if c.Stages == nil {
+		c.Stages = []ProcedureStage{}
+	}
+	for i := range c.Stages {
+		if c.Stages[i].Executions == nil {
+			c.Stages[i].Executions = []EnabledExecution{}
+		}
+		for j := range c.Stages[i].Executions {
+			if len(c.Stages[i].Executions[j].Execution.Params) == 0 {
+				c.Stages[i].Executions[j].Execution.Params = json.RawMessage(`{}`)
+			}
+		}
+	}
+}
+
+// CanonicalStagesJSON renders stages as JSON with object keys sorted, so two
+// values can be compared regardless of key order or whitespace in params.
+func CanonicalStagesJSON(stages []ProcedureStage) ([]byte, error) {
+	cfg := ProcedureConfig{Stages: stages}
+	cfg.normalize()
+	raw, err := json.Marshal(cfg.Stages)
+	if err != nil {
+		return nil, err
+	}
+	var generic interface{}
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, err
+	}
+	return json.Marshal(generic)
+}
+
+type Procedure struct {
+	ID     string          `json:"-"`
+	Name   string          `json:"name"`
+	Tags   []string        `json:"tags,omitempty"`
+	Config ProcedureConfig `json:"config"`
+}
+
+func (p *Procedure) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		ID     json.RawMessage `json:"_id"`
+		Name   string          `json:"name"`
+		Tags   []string        `json:"tags,omitempty"`
+		Config ProcedureConfig `json:"config"`
+	}
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	p.ID = parseMongoID(a.ID)
+	p.Name = a.Name
+	p.Tags = a.Tags
+	p.Config = a.Config
+	return nil
+}
+
+func (c *Client) CreateProcedure(ctx context.Context, name string, config ProcedureConfig) (*Procedure, error) {
+	config.normalize()
+	var p Procedure
+	err := c.Write(ctx, "CreateProcedure", map[string]interface{}{"name": name, "config": config}, &p)
+	return &p, err
+}
+
+func (c *Client) GetProcedure(ctx context.Context, idOrName string) (*Procedure, error) {
+	if idOrName == "" {
+		return nil, &NotFoundError{Message: "procedure identifier is empty"}
+	}
+	var p Procedure
+	err := c.Read(ctx, "GetProcedure", map[string]string{"procedure": idOrName}, &p)
+	return &p, err
+}
+
+func (c *Client) UpdateProcedure(ctx context.Context, id string, config ProcedureConfig) (*Procedure, error) {
+	config.normalize()
+	var p Procedure
+	err := c.Write(ctx, "UpdateProcedure", map[string]interface{}{"id": id, "config": config}, &p)
+	return &p, err
+}
+
+func (c *Client) RenameProcedure(ctx context.Context, id, name string) error {
+	return c.Write(ctx, "RenameProcedure", map[string]string{"id": id, "name": name}, nil)
+}
+
+func (c *Client) DeleteProcedure(ctx context.Context, id string) error {
+	return c.Write(ctx, "DeleteProcedure", IDParam{ID: id}, nil)
 }

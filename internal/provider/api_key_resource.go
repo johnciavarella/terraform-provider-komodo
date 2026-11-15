@@ -6,6 +6,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -19,11 +21,12 @@ type ApiKeyResource struct {
 }
 
 type ApiKeyResourceModel struct {
-	ID     types.String `tfsdk:"id"`
-	UserID types.String `tfsdk:"user_id"`
-	Name   types.String `tfsdk:"name"`
-	Key    types.String `tfsdk:"key"`
-	Secret types.String `tfsdk:"secret"`
+	ID      types.String `tfsdk:"id"`
+	UserID  types.String `tfsdk:"user_id"`
+	Name    types.String `tfsdk:"name"`
+	Expires types.Int64  `tfsdk:"expires"`
+	Key     types.String `tfsdk:"key"`
+	Secret  types.String `tfsdk:"secret"`
 }
 
 func NewApiKeyResource() resource.Resource {
@@ -57,6 +60,30 @@ func (r *ApiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"expires": schema.Int64Attribute{
+				Description: "Unix timestamp in milliseconds when the key expires. 0 (the default) means it never expires. Changing this forces a new resource.",
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(0),
+				PlanModifiers: []planmodifier.Int64{
+					// Keys created before this attribute existed have no
+					// expires in state, and were created without an expiry.
+					// Adopting the default (0) for them must not replace the
+					// key (and so rotate its secret); asking for a real
+					// expiry must, since an existing key cannot be changed.
+					int64planmodifier.RequiresReplaceIf(
+						func(_ context.Context, req planmodifier.Int64Request, resp *int64planmodifier.RequiresReplaceIfFuncResponse) {
+							if req.StateValue.IsNull() {
+								resp.RequiresReplace = !req.PlanValue.IsUnknown() && req.PlanValue.ValueInt64() != 0
+								return
+							}
+							resp.RequiresReplace = !req.PlanValue.Equal(req.StateValue)
+						},
+						"Replaces the key when expires changes.",
+						"Replaces the key when expires changes.",
+					),
 				},
 			},
 			"key": schema.StringAttribute{
@@ -99,7 +126,7 @@ func (r *ApiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	apiKey, err := r.client.CreateApiKeyForServiceUser(ctx, plan.UserID.ValueString(), plan.Name.ValueString())
+	apiKey, err := r.client.CreateApiKeyForServiceUser(ctx, plan.UserID.ValueString(), plan.Name.ValueString(), plan.Expires.ValueInt64())
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating API key", err.Error())
 		return
@@ -112,13 +139,31 @@ func (r *ApiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *ApiKeyResource) Read(_ context.Context, _ resource.ReadRequest, _ *resource.ReadResponse) {
-	// The Komodo API does not provide a way to read back API key secrets.
-	// All values are preserved from state as-is.
+func (r *ApiKeyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// The Komodo API does not provide a way to read back API key secrets, so
+	// values are preserved from state. The only change made here is giving
+	// keys created before `expires` existed its default of 0 (no expiry).
+	var state ApiKeyResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if state.Expires.IsNull() {
+		state.Expires = types.Int64Value(0)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	}
 }
 
-func (r *ApiKeyResource) Update(_ context.Context, _ resource.UpdateRequest, _ *resource.UpdateResponse) {
-	// All attributes are ForceNew — Update is never called.
+func (r *ApiKeyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Every attribute forces replacement, so there is nothing to send to
+	// Komodo. Update only runs to record `expires` for a key whose state
+	// predates that attribute; the key and secret are carried over.
+	var plan ApiKeyResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *ApiKeyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

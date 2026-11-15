@@ -654,3 +654,222 @@ func (d *DockerRegistryAccountDataSource) Read(ctx context.Context, req datasour
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
+
+// ---- Variable data source ----
+
+var _ datasource.DataSource = &VariableDataSource{}
+
+type VariableDataSource struct{ client *client.Client }
+
+type VariableDataSourceModel struct {
+	Name        types.String `tfsdk:"name"`
+	Value       types.String `tfsdk:"value"`
+	Description types.String `tfsdk:"description"`
+	IsSecret    types.Bool   `tfsdk:"is_secret"`
+}
+
+func NewVariableDataSource() datasource.DataSource { return &VariableDataSource{} }
+
+func (d *VariableDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_variable"
+}
+
+func (d *VariableDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetches a Komodo global variable by name.",
+		Attributes: map[string]schema.Attribute{
+			"name":        schema.StringAttribute{Required: true, Description: "Variable name."},
+			"value":       schema.StringAttribute{Computed: true, Sensitive: true, Description: "Variable value. For a secret variable read with a non-admin API key, Komodo returns a mask of '#' characters instead of the value."},
+			"description": schema.StringAttribute{Computed: true, Description: "Description shown in the Komodo UI."},
+			"is_secret":   schema.BoolAttribute{Computed: true, Description: "Whether the variable is marked as a secret."},
+		},
+	}
+}
+
+func (d *VariableDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *client.Client, got: %T", req.ProviderData))
+		return
+	}
+	d.client = c
+}
+
+func (d *VariableDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config VariableDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	v, err := d.client.GetVariable(ctx, config.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading variable", err.Error())
+		return
+	}
+
+	config.Name = types.StringValue(v.Name)
+	config.Value = types.StringValue(v.Value)
+	config.Description = types.StringValue(v.Description)
+	config.IsSecret = types.BoolValue(v.IsSecret)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}
+
+// ---- Alerter data source ----
+
+var _ datasource.DataSource = &AlerterDataSource{}
+
+type AlerterDataSource struct{ client *client.Client }
+
+type AlerterDataSourceModel struct {
+	ID           types.String `tfsdk:"id"`
+	Name         types.String `tfsdk:"name"`
+	Enabled      types.Bool   `tfsdk:"enabled"`
+	EndpointType types.String `tfsdk:"endpoint_type"`
+	AlertTypes   types.List   `tfsdk:"alert_types"`
+}
+
+func NewAlerterDataSource() datasource.DataSource { return &AlerterDataSource{} }
+
+func (d *AlerterDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_alerter"
+}
+
+func (d *AlerterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetches a Komodo alerter by ID or name. The endpoint URL is not exposed, since it usually embeds a token.",
+		Attributes: map[string]schema.Attribute{
+			"id":            schema.StringAttribute{Required: true, Description: "Alerter ID or name."},
+			"name":          schema.StringAttribute{Computed: true},
+			"enabled":       schema.BoolAttribute{Computed: true, Description: "Whether the alerter sends alerts."},
+			"endpoint_type": schema.StringAttribute{Computed: true, Description: "Endpoint type: Custom, Slack, Discord, Ntfy or Pushover."},
+			"alert_types":   schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Alert types the alerter is limited to. Empty means all types."},
+		},
+	}
+}
+
+func (d *AlerterDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *client.Client, got: %T", req.ProviderData))
+		return
+	}
+	d.client = c
+}
+
+func (d *AlerterDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config AlerterDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	alerter, err := d.client.GetAlerter(ctx, config.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading alerter", err.Error())
+		return
+	}
+
+	config.ID = types.StringValue(alerter.ID)
+	config.Name = types.StringValue(alerter.Name)
+	config.Enabled = types.BoolValue(alerter.Config.Enabled)
+	config.EndpointType = types.StringValue(alerter.Config.Endpoint.Type)
+	alertTypes := alerter.Config.AlertTypes
+	if alertTypes == nil {
+		alertTypes = []string{}
+	}
+	list, diags := types.ListValueFrom(ctx, types.StringType, alertTypes)
+	resp.Diagnostics.Append(diags...)
+	config.AlertTypes = list
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}
+
+// ---- Procedure data source ----
+
+var _ datasource.DataSource = &ProcedureDataSource{}
+
+type ProcedureDataSource struct{ client *client.Client }
+
+type ProcedureDataSourceModel struct {
+	ID               types.String `tfsdk:"id"`
+	Name             types.String `tfsdk:"name"`
+	ScheduleFormat   types.String `tfsdk:"schedule_format"`
+	Schedule         types.String `tfsdk:"schedule"`
+	ScheduleEnabled  types.Bool   `tfsdk:"schedule_enabled"`
+	ScheduleTimezone types.String `tfsdk:"schedule_timezone"`
+	WebhookEnabled   types.Bool   `tfsdk:"webhook_enabled"`
+	StageNames       types.List   `tfsdk:"stage_names"`
+}
+
+func NewProcedureDataSource() datasource.DataSource { return &ProcedureDataSource{} }
+
+func (d *ProcedureDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_procedure"
+}
+
+func (d *ProcedureDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetches a Komodo procedure by ID or name.",
+		Attributes: map[string]schema.Attribute{
+			"id":                schema.StringAttribute{Required: true, Description: "Procedure ID or name."},
+			"name":              schema.StringAttribute{Computed: true},
+			"schedule_format":   schema.StringAttribute{Computed: true, Description: "English or Cron."},
+			"schedule":          schema.StringAttribute{Computed: true, Description: "Schedule expression. Empty when the procedure has no schedule."},
+			"schedule_enabled":  schema.BoolAttribute{Computed: true},
+			"schedule_timezone": schema.StringAttribute{Computed: true},
+			"webhook_enabled":   schema.BoolAttribute{Computed: true},
+			"stage_names":       schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Names of the procedure's stages, in run order."},
+		},
+	}
+}
+
+func (d *ProcedureDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	c, ok := req.ProviderData.(*client.Client)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *client.Client, got: %T", req.ProviderData))
+		return
+	}
+	d.client = c
+}
+
+func (d *ProcedureDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config ProcedureDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	procedure, err := d.client.GetProcedure(ctx, config.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading procedure", err.Error())
+		return
+	}
+
+	config.ID = types.StringValue(procedure.ID)
+	config.Name = types.StringValue(procedure.Name)
+	config.ScheduleFormat = types.StringValue(procedure.Config.ScheduleFormat)
+	config.Schedule = types.StringValue(procedure.Config.Schedule)
+	config.ScheduleEnabled = types.BoolValue(procedure.Config.ScheduleEnabled)
+	config.ScheduleTimezone = types.StringValue(procedure.Config.ScheduleTimezone)
+	config.WebhookEnabled = types.BoolValue(procedure.Config.WebhookEnabled)
+	names := make([]string, 0, len(procedure.Config.Stages))
+	for _, s := range procedure.Config.Stages {
+		names = append(names, s.Name)
+	}
+	list, diags := types.ListValueFrom(ctx, types.StringType, names)
+	resp.Diagnostics.Append(diags...)
+	config.StageNames = list
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+}

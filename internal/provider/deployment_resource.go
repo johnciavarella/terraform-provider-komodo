@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,9 +22,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &DeploymentResource{}
-	_ resource.ResourceWithImportState = &DeploymentResource{}
-	_ resource.ResourceWithModifyPlan  = &DeploymentResource{}
+	_ resource.Resource                   = &DeploymentResource{}
+	_ resource.ResourceWithImportState    = &DeploymentResource{}
+	_ resource.ResourceWithValidateConfig = &DeploymentResource{}
+	_ resource.ResourceWithModifyPlan     = &DeploymentResource{}
 )
 
 type DeploymentResource struct {
@@ -50,6 +52,8 @@ type DeploymentResourceModel struct {
 	Command              types.String `tfsdk:"command"`
 	SendAlerts           types.Bool   `tfsdk:"send_alerts"`
 	AutoUpdate           types.Bool   `tfsdk:"auto_update"`
+	RedeployOnBuild      types.Bool   `tfsdk:"redeploy_on_build"`
+	CustomName           types.String `tfsdk:"custom_name"`
 	Ports                types.String `tfsdk:"ports"`
 	Volumes              types.String `tfsdk:"volumes"`
 	Environment          types.String `tfsdk:"environment"`
@@ -58,6 +62,8 @@ type DeploymentResourceModel struct {
 	Started              types.Bool   `tfsdk:"started"`
 	Deployed             types.Bool   `tfsdk:"deployed"`
 	Tags                 types.List   `tfsdk:"tags"`
+	Description          types.String `tfsdk:"description"`
+	Template             types.Bool   `tfsdk:"template"`
 }
 
 func NewDeploymentResource() resource.Resource {
@@ -131,6 +137,12 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				ElementType: types.StringType,
 			},
+			"custom_name": schema.StringAttribute{
+				Description: "Container (or swarm service) name, if it should differ from the deployment name. Empty uses the deployment name.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
+			},
 			"network": schema.StringAttribute{
 				Description:   "Docker network to connect to.",
 				Optional:      true,
@@ -185,6 +197,12 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"redeploy_on_build": schema.BoolAttribute{
+				Description: "Redeploy the deployment whenever its attached Komodo build finishes. Only applies when image_type is \"Build\".",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
 			"ports": schema.StringAttribute{
 				Description: "Port mappings, newline-separated (e.g., \"8080:80\\n9090:90\").",
 				Optional:    true,
@@ -226,6 +244,8 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
 			"tags": schema.ListAttribute{
 				Description: "List of tag names to apply to this deployment.",
 				Optional:    true,
@@ -233,6 +253,23 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				ElementType: types.StringType,
 			},
 		},
+	}
+}
+
+// containerNamePattern is Docker's container/service naming rule. Komodo
+// rewrites a custom_name that does not match it, which would leave the
+// applied value different from the configured one.
+var containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+func (r *DeploymentResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var name types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("custom_name"), &name)...)
+	if name.IsNull() || name.IsUnknown() || name.ValueString() == "" {
+		return
+	}
+	if !containerNamePattern.MatchString(name.ValueString()) {
+		resp.Diagnostics.AddAttributeError(path.Root("custom_name"), "Invalid custom_name",
+			fmt.Sprintf("%q is not a valid container name. It must start with a letter or digit and contain only letters, digits, '_', '.' and '-'.", name.ValueString()))
 	}
 }
 
@@ -278,6 +315,9 @@ func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel) 
 		Labels:               m.Labels.ValueString(),
 		SendAlerts:           client.BoolPtr(m.SendAlerts.ValueBool()),
 		AutoUpdate:           client.BoolPtr(m.AutoUpdate.ValueBool()),
+		Redeploy:             client.BoolPtr(m.RedeployOnBuild.ValueBool()),
+		// A pointer, so an empty value is still sent and clears the name.
+		CustomName: client.StringPtr(m.CustomName.ValueString()),
 	}
 	if !m.Replicas.IsNull() && !m.Replicas.IsUnknown() {
 		cfg.Replicas = client.IntPtr(int(m.Replicas.ValueInt64()))
@@ -311,6 +351,11 @@ func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deplo
 	}
 	m.ImageRegistryAccount = types.StringValue(d.Config.ImageRegistryAccount)
 	m.Network = types.StringValue(d.Config.Network)
+	if d.Config.CustomName != nil {
+		m.CustomName = types.StringValue(*d.Config.CustomName)
+	} else {
+		m.CustomName = types.StringValue("")
+	}
 	m.RestartMode = types.StringValue(d.Config.RestartMode)
 	m.TerminationSignal = types.StringValue(d.Config.TerminationSignal)
 	m.TermSignalLabels = types.StringValue(d.Config.TermSignalLabels)
@@ -321,6 +366,11 @@ func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deplo
 	}
 	if d.Config.AutoUpdate != nil {
 		m.AutoUpdate = types.BoolValue(*d.Config.AutoUpdate)
+	}
+	if d.Config.Redeploy != nil {
+		m.RedeployOnBuild = types.BoolValue(*d.Config.Redeploy)
+	} else {
+		m.RedeployOnBuild = types.BoolValue(false)
 	}
 	if d.Config.SkipSecretInterp != nil {
 		m.SkipSecretInterp = types.BoolValue(*d.Config.SkipSecretInterp)
@@ -396,6 +446,7 @@ func (r *DeploymentResource) Create(ctx context.Context, req resource.CreateRequ
 	tagsFromPlan := plan.Tags
 	mapDeploymentToModel(ctx, r.client, deployment, &plan)
 	applyResourceTags(ctx, r.client, "Deployment", deployment.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Deployment", deployment.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -427,6 +478,7 @@ func (r *DeploymentResource) Read(ctx context.Context, req resource.ReadRequest,
 	}
 
 	mapDeploymentToModel(ctx, r.client, deployment, &state)
+	readResourceMeta(ctx, r.client, "Deployment", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -467,6 +519,7 @@ func (r *DeploymentResource) Update(ctx context.Context, req resource.UpdateRequ
 	tagsFromPlan := plan.Tags
 	mapDeploymentToModel(ctx, r.client, deployment, &plan)
 	applyResourceTags(ctx, r.client, "Deployment", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Deployment", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

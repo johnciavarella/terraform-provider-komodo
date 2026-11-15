@@ -2,13 +2,17 @@ package provider
 
 import (
 	"context"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"os"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/johnciavarella/terraform-provider-komodo/internal/client"
 )
@@ -220,6 +224,79 @@ func applyResourceTags(ctx context.Context, c *client.Client, targetType, id str
 	}
 }
 
+// metaDescriptionAttribute and metaTemplateAttribute are shared by every
+// taggable resource. Both follow the "not managed unless configured" rule:
+// left out of config, the value in Komodo is neither changed nor read.
+func metaDescriptionAttribute() resourceschema.StringAttribute {
+	return resourceschema.StringAttribute{
+		Optional:    true,
+		Description: "Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to \"\" to clear it.",
+	}
+}
+
+func metaTemplateAttribute() resourceschema.BoolAttribute {
+	return resourceschema.BoolAttribute{
+		Optional:    true,
+		Description: "Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.",
+	}
+}
+
+// applyResourceMeta sends description and template when they are configured.
+func applyResourceMeta(ctx context.Context, c *client.Client, targetType, id string, description types.String, template types.Bool, diags *diag.Diagnostics) {
+	var d *string
+	var t *bool
+	if !description.IsNull() && !description.IsUnknown() {
+		d = client.StringPtr(description.ValueString())
+	}
+	if !template.IsNull() && !template.IsUnknown() {
+		t = client.BoolPtr(template.ValueBool())
+	}
+	if d == nil && t == nil {
+		return
+	}
+	if err := c.UpdateResourceMetaFields(ctx, targetType, id, d, t); err != nil {
+		diags.AddError("Error updating resource description/template", err.Error())
+	}
+}
+
+// readResourceMeta refreshes description and template from Komodo, but only
+// the ones that are managed (non-null in state). It makes no API call when
+// neither is.
+func readResourceMeta(ctx context.Context, c *client.Client, targetType, id string, description *types.String, template *types.Bool, diags *diag.Diagnostics) {
+	if description.IsNull() && template.IsNull() {
+		return
+	}
+	meta, err := c.GetResourceMeta(ctx, targetType, id)
+	if err != nil {
+		diags.AddError("Error reading resource description/template", err.Error())
+		return
+	}
+	if !description.IsNull() {
+		*description = types.StringValue(meta.Description)
+	}
+	if !template.IsNull() {
+		*template = types.BoolValue(meta.Template)
+	}
+}
+
+// validateResourceName rejects names Komodo would rewrite on save. Komodo
+// trims the name and replaces newlines, so such a name would come back
+// different from the configured one and fail the apply.
+func validateResourceName(ctx context.Context, config tfsdk.Config, diags *diag.Diagnostics) {
+	var name types.String
+	diags.Append(config.GetAttribute(ctx, path.Root("name"), &name)...)
+	if name.IsNull() || name.IsUnknown() {
+		return
+	}
+	v := name.ValueString()
+	switch {
+	case strings.TrimSpace(v) == "":
+		diags.AddAttributeError(path.Root("name"), "Invalid name", "name must not be empty.")
+	case v != strings.TrimSpace(v) || strings.ContainsAny(v, "\r\n"):
+		diags.AddAttributeError(path.Root("name"), "Invalid name", "name must not start or end with whitespace or contain line breaks.")
+	}
+}
+
 func (p *KomodoProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewServerResource,
@@ -234,6 +311,9 @@ func (p *KomodoProvider) Resources(_ context.Context) []func() resource.Resource
 		NewGitProviderAccountResource,
 		NewDockerRegistryAccountResource,
 		NewOnboardingKeyResource,
+		NewVariableResource,
+		NewAlerterResource,
+		NewProcedureResource,
 	}
 }
 
@@ -247,5 +327,8 @@ func (p *KomodoProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewTagDataSource,
 		NewBuilderDataSource,
 		NewDockerRegistryAccountDataSource,
+		NewVariableDataSource,
+		NewAlerterDataSource,
+		NewProcedureDataSource,
 	}
 }

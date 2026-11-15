@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &BuildResource{}
-	_ resource.ResourceWithImportState = &BuildResource{}
+	_ resource.Resource                   = &BuildResource{}
+	_ resource.ResourceWithImportState    = &BuildResource{}
+	_ resource.ResourceWithValidateConfig = &BuildResource{}
 )
 
 type BuildResource struct {
@@ -52,6 +53,9 @@ type BuildResourceModel struct {
 	SkipSecretInterp     types.Bool   `tfsdk:"skip_secret_interp"`
 	UseBuildx            types.Bool   `tfsdk:"use_buildx"`
 	BuildArgs            types.String `tfsdk:"build_args"`
+	SecretArgs           types.String `tfsdk:"secret_args"`
+	ExtraArgs            types.List   `tfsdk:"extra_args"`
+	Version              types.String `tfsdk:"version"`
 	Labels               types.String `tfsdk:"labels"`
 	WebhookEnabled       types.Bool   `tfsdk:"webhook_enabled"`
 	WebhookSecret        types.String `tfsdk:"webhook_secret"`
@@ -59,6 +63,8 @@ type BuildResourceModel struct {
 	PreBuildPath         types.String `tfsdk:"pre_build_path"`
 	PreBuildCommand      types.String `tfsdk:"pre_build_command"`
 	Tags                 types.List   `tfsdk:"tags"`
+	Description          types.String `tfsdk:"description"`
+	Template             types.Bool   `tfsdk:"template"`
 }
 
 // imageRegistryObjectType is the Terraform object shape for `image_registry`
@@ -121,13 +127,22 @@ func (r *BuildResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"skip_secret_interp": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Skip Komodo variable / secret interpolation in build_args."},
 			"use_buildx":         schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Use docker buildx."},
 			"build_args":         schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Build arguments."},
-			"labels":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Image labels."},
-			"webhook_enabled":    schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Enable webhooks."},
-			"webhook_secret":     schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Alternate webhook secret for this build."},
-			"files_on_host":      schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Source files from host."},
-			"pre_build_path":     schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Working directory for the pre-build command."},
-			"pre_build_command":  schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run before docker build."},
-			"tags":               schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this build."},
+			"secret_args":        schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Secret build arguments, newline-separated KEY=value. Passed with docker secret mounts so they are not visible in the final image, unlike build_args."},
+			"extra_args":         schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "Extra docker CLI arguments to include in the build command. Leave it out and Terraform does not manage the list; set it to [] to clear it."},
+			"version": schema.StringAttribute{
+				Optional: true, Computed: true,
+				Description:   "Current build version as major.minor.patch (e.g. \"1.2.3\"). Komodo bumps the patch on every build while auto_increment_version is true, so only set this together with auto_increment_version = false.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"labels":            schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Image labels."},
+			"webhook_enabled":   schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Enable webhooks."},
+			"webhook_secret":    schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Alternate webhook secret for this build."},
+			"files_on_host":     schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(false), Description: "Source files from host."},
+			"pre_build_path":    schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Working directory for the pre-build command."},
+			"pre_build_command": schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Command to run before docker build."},
+			"description":       metaDescriptionAttribute(),
+			"template":          metaTemplateAttribute(),
+			"tags":              schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this build."},
 		},
 	}
 }
@@ -142,6 +157,18 @@ func (r *BuildResource) Configure(_ context.Context, req resource.ConfigureReque
 		return
 	}
 	r.client = c
+}
+
+// ValidateConfig rejects a version that is not major.minor.patch at plan time.
+func (r *BuildResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var version types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("version"), &version)...)
+	if resp.Diagnostics.HasError() || version.IsNull() || version.IsUnknown() {
+		return
+	}
+	if _, err := client.ParseBuildVersion(version.ValueString()); err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("version"), "Invalid build version", err.Error())
+	}
 }
 
 func buildConfigFromModel(ctx context.Context, m *BuildResourceModel) client.BuildConfig {
@@ -166,15 +193,29 @@ func buildConfigFromModel(ctx context.Context, m *BuildResourceModel) client.Bui
 		SkipSecretInterp:     client.BoolPtr(m.SkipSecretInterp.ValueBool()),
 		UseBuildx:            client.BoolPtr(m.UseBuildx.ValueBool()),
 		BuildArgs:            m.BuildArgs.ValueString(),
-		Labels:               m.Labels.ValueString(),
-		WebhookEnabled:       client.BoolPtr(m.WebhookEnabled.ValueBool()),
-		WebhookSecret:        m.WebhookSecret.ValueString(),
-		FilesOnHost:          client.BoolPtr(m.FilesOnHost.ValueBool()),
+		// A pointer, so an empty value is still sent and clears the args.
+		SecretArgs:     client.StringPtr(m.SecretArgs.ValueString()),
+		Labels:         m.Labels.ValueString(),
+		WebhookEnabled: client.BoolPtr(m.WebhookEnabled.ValueBool()),
+		WebhookSecret:  m.WebhookSecret.ValueString(),
+		FilesOnHost:    client.BoolPtr(m.FilesOnHost.ValueBool()),
 	}
 	if !m.Links.IsNull() && !m.Links.IsUnknown() {
 		var v []string
 		m.Links.ElementsAs(ctx, &v, false)
 		cfg.Links = v
+	}
+	// Null means "not managed" and nothing is sent; [] is sent and clears.
+	if !m.ExtraArgs.IsNull() && !m.ExtraArgs.IsUnknown() {
+		v := []string{}
+		m.ExtraArgs.ElementsAs(ctx, &v, false)
+		cfg.ExtraArgs = &v
+	}
+	// Version is validated in ValidateConfig; an unparsable value is skipped here.
+	if !m.Version.IsNull() && !m.Version.IsUnknown() {
+		if v, err := client.ParseBuildVersion(m.Version.ValueString()); err == nil {
+			cfg.Version = v
+		}
 	}
 	if m.PreBuildPath.ValueString() != "" || m.PreBuildCommand.ValueString() != "" {
 		cfg.PreBuild = &client.SystemCommand{
@@ -220,6 +261,24 @@ func mapBuildToModel(ctx context.Context, c *client.Client, b *client.Build, m *
 	m.Dockerfile = types.StringValue(strings.TrimRight(b.Config.Dockerfile, "\n"))
 	m.BuildArgs = types.StringValue(strings.TrimRight(b.Config.BuildArgs, "\n"))
 	m.Labels = types.StringValue(strings.TrimRight(b.Config.Labels, "\n"))
+	secretArgs := ""
+	if b.Config.SecretArgs != nil {
+		secretArgs = strings.TrimRight(*b.Config.SecretArgs, "\n")
+	}
+	m.SecretArgs = types.StringValue(secretArgs)
+	// Unmanaged (null) stays null; otherwise show what Komodo has.
+	if m.ExtraArgs.IsNull() || m.ExtraArgs.IsUnknown() {
+		m.ExtraArgs = types.ListNull(types.StringType)
+	} else if b.Config.ExtraArgs != nil && len(*b.Config.ExtraArgs) > 0 {
+		m.ExtraArgs, _ = types.ListValueFrom(ctx, types.StringType, *b.Config.ExtraArgs)
+	} else {
+		m.ExtraArgs = types.ListValueMust(types.StringType, []attr.Value{})
+	}
+	if b.Config.Version != nil {
+		m.Version = types.StringValue(b.Config.Version.String())
+	} else if m.Version.IsUnknown() {
+		m.Version = types.StringNull()
+	}
 	m.WebhookSecret = types.StringValue(b.Config.WebhookSecret)
 
 	m.Links = mapListToModel(b.Config.Links, m.Links)
@@ -306,6 +365,7 @@ func (r *BuildResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tagsFromPlan := plan.Tags
 	mapBuildToModel(ctx, r.client, build, &plan)
 	applyResourceTags(ctx, r.client, "Build", build.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Build", build.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -331,6 +391,7 @@ func (r *BuildResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	mapBuildToModel(ctx, r.client, build, &state)
+	readResourceMeta(ctx, r.client, "Build", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -367,6 +428,7 @@ func (r *BuildResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tagsFromPlan := plan.Tags
 	mapBuildToModel(ctx, r.client, build, &plan)
 	applyResourceTags(ctx, r.client, "Build", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Build", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

@@ -44,7 +44,9 @@ resource "komodo_deployment" "nginx" {
 
 - `auto_update` (Boolean) Automatically redeploy when newer images are found.
 - `command` (String) Override the container command.
+- `custom_name` (String) Container (or swarm service) name, if it should differ from the deployment name. Empty uses the deployment name.
 - `deployed` (Boolean) When true, triggers a full Deploy (pull image + docker run) after create/update. Intent-based and async.
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `environment` (String) Environment variables, newline-separated KEY=VALUE pairs.
 - `extra_args` (List of String) Extra arguments for docker run.
 - `image` (String) Docker image name (e.g. "nginx:latest") when image_type = "Image", or the build ID when image_type = "Build".
@@ -55,6 +57,7 @@ resource "komodo_deployment" "nginx" {
 - `network` (String) Docker network to connect to.
 - `poll_for_updates` (Boolean) Poll the configured registry for newer image digests.
 - `ports` (String) Port mappings, newline-separated (e.g., "8080:80\n9090:90").
+- `redeploy_on_build` (Boolean) Redeploy the deployment whenever its attached Komodo build finishes. Only applies when image_type is "Build".
 - `replicas` (Number) Number of replicas for swarm-mode deployments. Ignored for plain Docker.
 - `restart_mode` (String) Restart policy (e.g., unless-stopped, always, on-failure, no).
 - `send_alerts` (Boolean) Whether to send deployment state change alerts.
@@ -63,6 +66,7 @@ resource "komodo_deployment" "nginx" {
 - `started` (Boolean) Whether the deployment container should be running. When true, runs Deploy (docker run). When false, runs DestroyDeployment (docker stop + rm). Intent-based and async.
 - `swarm_id` (String) Swarm to attach the deployment to (ID or name).
 - `tags` (List of String) List of tag names to apply to this deployment.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 - `term_signal_labels` (String) Newline-separated SIGNAL=label pairs for per-stage termination signals.
 - `termination_signal` (String) Signal sent to the container on stop (e.g. SIGTERM, SIGINT). Defaults to Docker's default if empty.
 - `termination_timeout` (Number) Seconds to wait for graceful shutdown before SIGKILL.

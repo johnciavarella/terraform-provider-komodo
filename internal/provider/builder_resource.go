@@ -26,10 +26,12 @@ type BuilderResource struct {
 }
 
 type BuilderResourceModel struct {
-	ID       types.String `tfsdk:"id"`
-	Name     types.String `tfsdk:"name"`
-	ServerID types.String `tfsdk:"server_id"`
-	Tags     types.List   `tfsdk:"tags"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	ServerID    types.String `tfsdk:"server_id"`
+	Tags        types.List   `tfsdk:"tags"`
+	Description types.String `tfsdk:"description"`
+	Template    types.Bool   `tfsdk:"template"`
 }
 
 func NewBuilderResource() resource.Resource {
@@ -48,9 +50,11 @@ func (r *BuilderResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Computed: true, Description: "Unique identifier.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
-			"name":      schema.StringAttribute{Required: true, Description: "Display name."},
-			"server_id": schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Server used for building (ID or name)."},
-			"tags":      schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this builder."},
+			"name":        schema.StringAttribute{Required: true, Description: "Display name."},
+			"server_id":   schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "Server used for building (ID or name). If the builder has several servers in Komodo, this is the first; changing it replaces the whole list with the one server."},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
+			"tags":        schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this builder."},
 		},
 	}
 }
@@ -89,6 +93,7 @@ func (r *BuilderResource) Create(ctx context.Context, req resource.CreateRequest
 	plan.ServerID = types.StringValue(preserveServerIDName(ctx, r.client, plan.ServerID.ValueString(), builder.Config.ServerID))
 	plan.Tags = mapTagsToModel(ctx, r.client, builder.Tags, plan.Tags)
 	applyResourceTags(ctx, r.client, "Builder", builder.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Builder", builder.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -117,6 +122,7 @@ func (r *BuilderResource) Read(ctx context.Context, req resource.ReadRequest, re
 	state.Name = types.StringValue(builder.Name)
 	state.ServerID = types.StringValue(preserveServerIDName(ctx, r.client, state.ServerID.ValueString(), builder.Config.ServerID))
 	state.Tags = mapTagsToModel(ctx, r.client, builder.Tags, state.Tags)
+	readResourceMeta(ctx, r.client, "Builder", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -142,10 +148,20 @@ func (r *BuilderResource) Update(ctx context.Context, req resource.UpdateRequest
 		}
 	}
 
-	builder, err := r.client.UpdateBuilder(ctx, client.UpdateBuilderParams{
-		ID:     state.ID.ValueString(),
-		Config: client.BuilderConfig{ServerID: resolveServerID(ctx, r.client, plan.ServerID.ValueString())},
-	})
+	// The config is only sent when server_id changes. A Server builder can
+	// hold several servers in Komodo, of which this resource manages the
+	// first; resending server_id on a rename or tag change would drop the
+	// others.
+	var builder *client.Builder
+	var err error
+	if plan.ServerID.Equal(state.ServerID) {
+		builder, err = r.client.GetBuilder(ctx, state.ID.ValueString())
+	} else {
+		builder, err = r.client.UpdateBuilder(ctx, client.UpdateBuilderParams{
+			ID:     state.ID.ValueString(),
+			Config: client.BuilderConfig{ServerID: resolveServerID(ctx, r.client, plan.ServerID.ValueString())},
+		})
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating builder", err.Error())
 		return
@@ -157,6 +173,7 @@ func (r *BuilderResource) Update(ctx context.Context, req resource.UpdateRequest
 	plan.ServerID = types.StringValue(preserveServerIDName(ctx, r.client, plan.ServerID.ValueString(), builder.Config.ServerID))
 	plan.Tags = mapTagsToModel(ctx, r.client, builder.Tags, plan.Tags)
 	applyResourceTags(ctx, r.client, "Builder", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Builder", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}

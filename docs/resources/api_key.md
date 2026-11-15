@@ -34,6 +34,10 @@ output "ci_bot_api_secret" {
 - `name` (String) Name for the API key. Changing this forces a new resource.
 - `user_id` (String) ID of the service user to create the API key for. Changing this forces a new resource.
 
+### Optional
+
+- `expires` (Number) Unix timestamp in milliseconds when the key expires. 0 (the default) means it never expires. Changing this forces a new resource.
+
 ### Read-Only
 
 - `id` (String) Unique identifier (same as the key value).

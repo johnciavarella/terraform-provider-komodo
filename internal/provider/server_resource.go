@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/float64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -18,8 +22,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &ServerResource{}
-	_ resource.ResourceWithImportState = &ServerResource{}
+	_ resource.Resource                   = &ServerResource{}
+	_ resource.ResourceWithImportState    = &ServerResource{}
+	_ resource.ResourceWithValidateConfig = &ServerResource{}
 )
 
 type ServerResource struct {
@@ -27,31 +32,132 @@ type ServerResource struct {
 }
 
 type ServerResourceModel struct {
-	ID                    types.String  `tfsdk:"id"`
-	Name                  types.String  `tfsdk:"name"`
-	Address               types.String  `tfsdk:"address"`
-	ExternalAddress       types.String  `tfsdk:"external_address"`
-	Region                types.String  `tfsdk:"region"`
-	Enabled               types.Bool    `tfsdk:"enabled"`
-	Passkey               types.String  `tfsdk:"passkey"`
-	InsecureTLS           types.Bool    `tfsdk:"insecure_tls"`
-	AutoRotateKeys        types.Bool    `tfsdk:"auto_rotate_keys"`
-	PeripheryPublicKey    types.String  `tfsdk:"periphery_public_key"`
-	IgnoreMounts          types.List    `tfsdk:"ignore_mounts"`
-	Links                 types.List    `tfsdk:"links"`
-	StatsMonitoring       types.Bool    `tfsdk:"stats_monitoring"`
-	AutoPrune             types.Bool    `tfsdk:"auto_prune"`
-	SendUnreachableAlerts types.Bool    `tfsdk:"send_unreachable_alerts"`
-	SendCPUAlerts         types.Bool    `tfsdk:"send_cpu_alerts"`
-	SendMemAlerts         types.Bool    `tfsdk:"send_mem_alerts"`
-	SendDiskAlerts        types.Bool    `tfsdk:"send_disk_alerts"`
-	CPUWarning            types.Float64 `tfsdk:"cpu_warning"`
-	CPUCritical           types.Float64 `tfsdk:"cpu_critical"`
-	MemWarning            types.Float64 `tfsdk:"mem_warning"`
-	MemCritical           types.Float64 `tfsdk:"mem_critical"`
-	DiskWarning           types.Float64 `tfsdk:"disk_warning"`
-	DiskCritical          types.Float64 `tfsdk:"disk_critical"`
-	Tags                  types.List    `tfsdk:"tags"`
+	ID                        types.String  `tfsdk:"id"`
+	Name                      types.String  `tfsdk:"name"`
+	Address                   types.String  `tfsdk:"address"`
+	ExternalAddress           types.String  `tfsdk:"external_address"`
+	Region                    types.String  `tfsdk:"region"`
+	Enabled                   types.Bool    `tfsdk:"enabled"`
+	Passkey                   types.String  `tfsdk:"passkey"`
+	InsecureTLS               types.Bool    `tfsdk:"insecure_tls"`
+	AutoRotateKeys            types.Bool    `tfsdk:"auto_rotate_keys"`
+	PeripheryPublicKey        types.String  `tfsdk:"periphery_public_key"`
+	IgnoreMounts              types.List    `tfsdk:"ignore_mounts"`
+	Links                     types.List    `tfsdk:"links"`
+	MaintenanceWindows        types.List    `tfsdk:"maintenance_windows"`
+	StatsMonitoring           types.Bool    `tfsdk:"stats_monitoring"`
+	AutoPrune                 types.Bool    `tfsdk:"auto_prune"`
+	SendUnreachableAlerts     types.Bool    `tfsdk:"send_unreachable_alerts"`
+	SendCPUAlerts             types.Bool    `tfsdk:"send_cpu_alerts"`
+	SendMemAlerts             types.Bool    `tfsdk:"send_mem_alerts"`
+	SendDiskAlerts            types.Bool    `tfsdk:"send_disk_alerts"`
+	SendVersionMismatchAlerts types.Bool    `tfsdk:"send_version_mismatch_alerts"`
+	CPUWarning                types.Float64 `tfsdk:"cpu_warning"`
+	CPUCritical               types.Float64 `tfsdk:"cpu_critical"`
+	MemWarning                types.Float64 `tfsdk:"mem_warning"`
+	MemCritical               types.Float64 `tfsdk:"mem_critical"`
+	DiskWarning               types.Float64 `tfsdk:"disk_warning"`
+	DiskCritical              types.Float64 `tfsdk:"disk_critical"`
+	Tags                      types.List    `tfsdk:"tags"`
+	Description               types.String  `tfsdk:"description"`
+	Template                  types.Bool    `tfsdk:"template"`
+}
+
+// maintenanceWindowObjectType is the Terraform object type for entries in
+// `maintenance_windows`.
+var maintenanceWindowObjectType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"name":             types.StringType,
+		"description":      types.StringType,
+		"schedule_type":    types.StringType,
+		"day_of_week":      types.StringType,
+		"date":             types.StringType,
+		"hour":             types.Int64Type,
+		"minute":           types.Int64Type,
+		"duration_minutes": types.Int64Type,
+		"timezone":         types.StringType,
+		"enabled":          types.BoolType,
+	},
+}
+
+type maintenanceWindowModel struct {
+	Name            types.String `tfsdk:"name"`
+	Description     types.String `tfsdk:"description"`
+	ScheduleType    types.String `tfsdk:"schedule_type"`
+	DayOfWeek       types.String `tfsdk:"day_of_week"`
+	Date            types.String `tfsdk:"date"`
+	Hour            types.Int64  `tfsdk:"hour"`
+	Minute          types.Int64  `tfsdk:"minute"`
+	DurationMinutes types.Int64  `tfsdk:"duration_minutes"`
+	Timezone        types.String `tfsdk:"timezone"`
+	Enabled         types.Bool   `tfsdk:"enabled"`
+}
+
+// maintenanceWindowsFromModel returns nil while the list is null or unknown
+// (leave Komodo's windows alone). An explicit empty list clears them.
+func maintenanceWindowsFromModel(ctx context.Context, list types.List) *[]client.MaintenanceWindow {
+	if list.IsUnknown() || list.IsNull() {
+		return nil
+	}
+	var rows []maintenanceWindowModel
+	list.ElementsAs(ctx, &rows, false)
+	out := make([]client.MaintenanceWindow, 0, len(rows))
+	for _, r := range rows {
+		scheduleType := r.ScheduleType.ValueString()
+		if scheduleType == "" {
+			scheduleType = "Daily"
+		}
+		out = append(out, client.MaintenanceWindow{
+			Name:            r.Name.ValueString(),
+			Description:     r.Description.ValueString(),
+			ScheduleType:    scheduleType,
+			DayOfWeek:       r.DayOfWeek.ValueString(),
+			Date:            r.Date.ValueString(),
+			Hour:            int(r.Hour.ValueInt64()),
+			Minute:          int(r.Minute.ValueInt64()),
+			DurationMinutes: int(r.DurationMinutes.ValueInt64()),
+			Timezone:        r.Timezone.ValueString(),
+			Enabled:         r.Enabled.ValueBool(),
+		})
+	}
+	return &out
+}
+
+// maintenanceWindowsToModel reports Komodo's windows only while the attribute
+// is managed (non-null in the model). A null attribute stays null whatever
+// Komodo holds, so windows set in the UI never show up as drift.
+func maintenanceWindowsToModel(vals *[]client.MaintenanceWindow, current types.List) types.List {
+	if current.IsNull() || current.IsUnknown() {
+		return types.ListNull(maintenanceWindowObjectType)
+	}
+	if vals == nil || len(*vals) == 0 {
+		return types.ListValueMust(maintenanceWindowObjectType, []attr.Value{})
+	}
+	objs := make([]attr.Value, 0, len(*vals))
+	for _, v := range *vals {
+		scheduleType := v.ScheduleType
+		if scheduleType == "" {
+			scheduleType = "Daily"
+		}
+		o, diags := types.ObjectValue(maintenanceWindowObjectType.AttrTypes, map[string]attr.Value{
+			"name":             types.StringValue(v.Name),
+			"description":      types.StringValue(v.Description),
+			"schedule_type":    types.StringValue(scheduleType),
+			"day_of_week":      types.StringValue(v.DayOfWeek),
+			"date":             types.StringValue(v.Date),
+			"hour":             types.Int64Value(int64(v.Hour)),
+			"minute":           types.Int64Value(int64(v.Minute)),
+			"duration_minutes": types.Int64Value(int64(v.DurationMinutes)),
+			"timezone":         types.StringValue(v.Timezone),
+			"enabled":          types.BoolValue(v.Enabled),
+		})
+		if diags.HasError() {
+			continue
+		}
+		objs = append(objs, o)
+	}
+	list, _ := types.ListValue(maintenanceWindowObjectType, objs)
+	return list
 }
 
 func NewServerResource() resource.Resource {
@@ -141,6 +247,24 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				ElementType: types.StringType,
 			},
+			"maintenance_windows": schema.ListNestedAttribute{
+				Description: "Scheduled windows during which alerts about this server are suppressed. Leave it out and Terraform does not manage the windows: whatever is set in the Komodo UI stays, and is not read into state. Set it to [] to remove all windows.",
+				Optional:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"name":             schema.StringAttribute{Required: true, Description: "Name of the window."},
+						"description":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "What the window is for."},
+						"schedule_type":    schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString("Daily"), Description: "\"Daily\" (default), \"Weekly\" or \"OneTime\"."},
+						"day_of_week":      schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "For Weekly windows: the day, for example \"Monday\"."},
+						"date":             schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "For OneTime windows: the date as YYYY-MM-DD."},
+						"hour":             schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(0), Description: "Start hour, 0-23."},
+						"minute":           schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(0), Description: "Start minute, 0-59."},
+						"duration_minutes": schema.Int64Attribute{Required: true, Description: "Length of the window in minutes."},
+						"timezone":         schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(""), Description: "TZ identifier, for example \"America/New_York\". Empty uses Komodo Core's timezone."},
+						"enabled":          schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Whether the window is active."},
+					},
+				},
+			},
 			"stats_monitoring": schema.BoolAttribute{
 				Description: "Whether to monitor server stats beyond health check.",
 				Optional:    true,
@@ -176,6 +300,14 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
+			},
+			"send_version_mismatch_alerts": schema.BoolAttribute{
+				Description: "Whether to send alerts when the server's Periphery version does not match Core. When unset, Komodo's own default (true) applies.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"cpu_warning": schema.Float64Attribute{
 				Description: "CPU warning threshold percentage.",
@@ -213,6 +345,8 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				Default:     float64default.StaticFloat64(95),
 			},
+			"description": metaDescriptionAttribute(),
+			"template":    metaTemplateAttribute(),
 			"tags": schema.ListAttribute{
 				Description: "List of tag names to apply to this server.",
 				Optional:    true,
@@ -220,6 +354,67 @@ func (r *ServerResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				ElementType: types.StringType,
 			},
 		},
+	}
+}
+
+// ValidateConfig checks maintenance window values that Komodo either rejects
+// with an opaque error or accepts without acting on them.
+func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var windows types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("maintenance_windows"), &windows)...)
+	if windows.IsNull() || windows.IsUnknown() {
+		return
+	}
+	for i, v := range windows.Elements() {
+		obj, ok := v.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		at := path.Root("maintenance_windows").AtListIndex(i)
+		attrs := obj.Attributes()
+		intRange := func(name string, min, max int64) {
+			n, ok := attrs[name].(types.Int64)
+			if !ok || n.IsNull() || n.IsUnknown() {
+				return
+			}
+			if n.ValueInt64() < min || n.ValueInt64() > max {
+				resp.Diagnostics.AddAttributeError(at.AtName(name), "Invalid "+name,
+					fmt.Sprintf("%d is out of range: must be between %d and %d.", n.ValueInt64(), min, max))
+			}
+		}
+		intRange("hour", 0, 23)
+		intRange("minute", 0, 59)
+		intRange("duration_minutes", 1, 4294967295)
+
+		// str reads a string attribute; null reads as "". ok is false while
+		// the value is not known yet.
+		str := func(name string) (string, bool) {
+			s, ok := attrs[name].(types.String)
+			if !ok || s.IsUnknown() {
+				return "", false
+			}
+			return s.ValueString(), true
+		}
+		scheduleType, ok := str("schedule_type")
+		if !ok {
+			continue
+		}
+		switch scheduleType {
+		case "", "Daily":
+		case "Weekly":
+			if day, ok := str("day_of_week"); ok && day == "" {
+				resp.Diagnostics.AddAttributeError(at.AtName("day_of_week"), "Missing day_of_week", "A Weekly window needs day_of_week, for example \"Monday\".")
+			}
+		case "OneTime":
+			if date, ok := str("date"); ok {
+				if _, err := time.Parse("2006-01-02", date); err != nil {
+					resp.Diagnostics.AddAttributeError(at.AtName("date"), "Invalid date", "A OneTime window needs date as YYYY-MM-DD.")
+				}
+			}
+		default:
+			resp.Diagnostics.AddAttributeError(at.AtName("schedule_type"), "Invalid schedule_type",
+				fmt.Sprintf("%q is not one of: Daily, Weekly, OneTime.", scheduleType))
+		}
 	}
 }
 
@@ -260,6 +455,11 @@ func serverConfigFromModel(ctx context.Context, m *ServerResourceModel) client.S
 		DiskWarning:           client.Float64Ptr(m.DiskWarning.ValueFloat64()),
 		DiskCritical:          client.Float64Ptr(m.DiskCritical.ValueFloat64()),
 	}
+	// Left unset (nil) when not configured so Komodo keeps its own default.
+	if !m.SendVersionMismatchAlerts.IsNull() && !m.SendVersionMismatchAlerts.IsUnknown() {
+		cfg.SendVersionMismatchAlerts = client.BoolPtr(m.SendVersionMismatchAlerts.ValueBool())
+	}
+	cfg.MaintenanceWindows = maintenanceWindowsFromModel(ctx, m.MaintenanceWindows)
 	if !m.IgnoreMounts.IsNull() && !m.IgnoreMounts.IsUnknown() {
 		var v []string
 		m.IgnoreMounts.ElementsAs(ctx, &v, false)
@@ -302,6 +502,7 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 	tagsFromPlan := plan.Tags
 	mapServerToModel(ctx, r.client, server, &plan)
 	applyResourceTags(ctx, r.client, "Server", server.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Server", server.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -327,6 +528,7 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	mapServerToModel(ctx, r.client, server, &state)
+	readResourceMeta(ctx, r.client, "Server", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -378,6 +580,7 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	tagsFromPlan := plan.Tags
 	mapServerToModel(ctx, r.client, server, &plan)
 	applyResourceTags(ctx, r.client, "Server", state.ID.ValueString(), tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Server", state.ID.ValueString(), plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -416,6 +619,7 @@ func mapServerToModel(ctx context.Context, c *client.Client, s *client.Server, m
 
 	m.IgnoreMounts = mapListToModel(s.Config.IgnoreMounts, m.IgnoreMounts)
 	m.Links = mapListToModel(s.Config.Links, m.Links)
+	m.MaintenanceWindows = maintenanceWindowsToModel(s.Config.MaintenanceWindows, m.MaintenanceWindows)
 
 	if s.Config.Enabled != nil {
 		m.Enabled = types.BoolValue(*s.Config.Enabled)
@@ -443,6 +647,11 @@ func mapServerToModel(ctx context.Context, c *client.Client, s *client.Server, m
 	}
 	if s.Config.SendDiskAlerts != nil {
 		m.SendDiskAlerts = types.BoolValue(*s.Config.SendDiskAlerts)
+	}
+	if s.Config.SendVersionMismatchAlerts != nil {
+		m.SendVersionMismatchAlerts = types.BoolValue(*s.Config.SendVersionMismatchAlerts)
+	} else if m.SendVersionMismatchAlerts.IsUnknown() {
+		m.SendVersionMismatchAlerts = types.BoolNull()
 	}
 	if s.Config.CPUWarning != nil {
 		m.CPUWarning = types.Float64Value(*s.Config.CPUWarning)
