@@ -77,6 +77,7 @@ resource "komodo_procedure" "backup" {
 
 ### Optional
 
+- `description` (String) Description shown in the Komodo UI. Leave it out and Terraform does not manage it; set it to "" to clear it.
 - `failure_alert` (Boolean) Send an alert when the procedure fails.
 - `schedule` (String) When to run the procedure. Cron uses six fields with seconds first, for example "0 0 3 * * ?". Empty means no schedule.
 - `schedule_alert` (Boolean) Send an alert each time the schedule runs.
@@ -85,6 +86,7 @@ resource "komodo_procedure" "backup" {
 - `schedule_timezone` (String) TZ identifier for the schedule, for example "America/New_York". Empty uses Komodo Core's timezone.
 - `stages` (Attributes List) Stages, run one after another. The executions inside a stage run in parallel. (see [below for nested schema](#nestedatt--stages))
 - `tags` (List of String) List of tag names to apply to this procedure.
+- `template` (Boolean) Mark the resource as a template in Komodo. Leave it out and Terraform does not manage the flag.
 - `webhook_enabled` (Boolean) Whether incoming webhooks trigger the procedure.
 - `webhook_secret` (String, Sensitive) Alternate webhook secret for this procedure. Empty uses the default secret from Komodo Core's config.
 

@@ -61,6 +61,8 @@ type ProcedureResourceModel struct {
 	WebhookEnabled   types.Bool            `tfsdk:"webhook_enabled"`
 	WebhookSecret    types.String          `tfsdk:"webhook_secret"`
 	Tags             types.List            `tfsdk:"tags"`
+	Description      types.String          `tfsdk:"description"`
+	Template         types.Bool            `tfsdk:"template"`
 }
 
 func NewProcedureResource() resource.Resource {
@@ -118,6 +120,8 @@ func (r *ProcedureResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"failure_alert":     schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Send an alert when the procedure fails."},
 			"webhook_enabled":   schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Whether incoming webhooks trigger the procedure."},
 			"webhook_secret":    schema.StringAttribute{Optional: true, Computed: true, Sensitive: true, Default: stringdefault.StaticString(""), Description: "Alternate webhook secret for this procedure. Empty uses the default secret from Komodo Core's config."},
+			"description":       metaDescriptionAttribute(),
+			"template":          metaTemplateAttribute(),
 			"tags":              schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: "List of tag names to apply to this procedure."},
 		},
 	}
@@ -138,6 +142,8 @@ func (r *ProcedureResource) Configure(_ context.Context, req resource.ConfigureR
 // ValidateConfig checks schedule_format and that every params value is a JSON
 // object. Values not known until apply are skipped.
 func (r *ProcedureResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	validateResourceName(ctx, req.Config, &resp.Diagnostics)
+
 	var format types.String
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("schedule_format"), &format)...)
 	if !format.IsNull() && !format.IsUnknown() && format.ValueString() != "English" && format.ValueString() != "Cron" {
@@ -304,6 +310,7 @@ func (r *ProcedureResource) Create(ctx context.Context, req resource.CreateReque
 	mapProcedureToModel(ctx, r.client, procedure, &plan)
 	saveProcedureStages(ctx, resp.Private, procedure.Config.Stages, &resp.Diagnostics)
 	applyResourceTags(ctx, r.client, "Procedure", procedure.ID, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Procedure", procedure.ID, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
@@ -342,6 +349,7 @@ func (r *ProcedureResource) Read(ctx context.Context, req resource.ReadRequest, 
 		state.Stages = procedureStagesToModel(procedure.Config.Stages, state.Stages)
 		resp.Diagnostics.Append(resp.Private.SetKey(ctx, procedureStagesPrivateKey, live)...)
 	}
+	readResourceMeta(ctx, r.client, "Procedure", state.ID.ValueString(), &state.Description, &state.Template, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -371,6 +379,7 @@ func (r *ProcedureResource) Update(ctx context.Context, req resource.UpdateReque
 	mapProcedureToModel(ctx, r.client, procedure, &plan)
 	saveProcedureStages(ctx, resp.Private, procedure.Config.Stages, &resp.Diagnostics)
 	applyResourceTags(ctx, r.client, "Procedure", id, tagsFromPlan, &resp.Diagnostics)
+	applyResourceMeta(ctx, r.client, "Procedure", id, plan.Description, plan.Template, &resp.Diagnostics)
 	if !tagsFromPlan.IsUnknown() {
 		plan.Tags = tagsFromPlan
 	}
