@@ -51,6 +51,7 @@ type DeploymentResourceModel struct {
 	SendAlerts           types.Bool   `tfsdk:"send_alerts"`
 	AutoUpdate           types.Bool   `tfsdk:"auto_update"`
 	RedeployOnBuild      types.Bool   `tfsdk:"redeploy_on_build"`
+	CustomName           types.String `tfsdk:"custom_name"`
 	Ports                types.String `tfsdk:"ports"`
 	Volumes              types.String `tfsdk:"volumes"`
 	Environment          types.String `tfsdk:"environment"`
@@ -131,6 +132,12 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
+			},
+			"custom_name": schema.StringAttribute{
+				Description: "Container (or swarm service) name, if it should differ from the deployment name. Empty uses the deployment name.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
 			},
 			"network": schema.StringAttribute{
 				Description:   "Docker network to connect to.",
@@ -286,6 +293,8 @@ func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel) 
 		SendAlerts:           client.BoolPtr(m.SendAlerts.ValueBool()),
 		AutoUpdate:           client.BoolPtr(m.AutoUpdate.ValueBool()),
 		Redeploy:             client.BoolPtr(m.RedeployOnBuild.ValueBool()),
+		// A pointer, so an empty value is still sent and clears the name.
+		CustomName: client.StringPtr(m.CustomName.ValueString()),
 	}
 	if !m.Replicas.IsNull() && !m.Replicas.IsUnknown() {
 		cfg.Replicas = client.IntPtr(int(m.Replicas.ValueInt64()))
@@ -319,6 +328,11 @@ func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deplo
 	}
 	m.ImageRegistryAccount = types.StringValue(d.Config.ImageRegistryAccount)
 	m.Network = types.StringValue(d.Config.Network)
+	if d.Config.CustomName != nil {
+		m.CustomName = types.StringValue(*d.Config.CustomName)
+	} else {
+		m.CustomName = types.StringValue("")
+	}
 	m.RestartMode = types.StringValue(d.Config.RestartMode)
 	m.TerminationSignal = types.StringValue(d.Config.TerminationSignal)
 	m.TermSignalLabels = types.StringValue(d.Config.TermSignalLabels)

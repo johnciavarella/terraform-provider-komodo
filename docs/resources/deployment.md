@@ -44,6 +44,7 @@ resource "komodo_deployment" "nginx" {
 
 - `auto_update` (Boolean) Automatically redeploy when newer images are found.
 - `command` (String) Override the container command.
+- `custom_name` (String) Container (or swarm service) name, if it should differ from the deployment name. Empty uses the deployment name.
 - `deployed` (Boolean) When true, triggers a full Deploy (pull image + docker run) after create/update. Intent-based and async.
 - `environment` (String) Environment variables, newline-separated KEY=VALUE pairs.
 - `extra_args` (List of String) Extra arguments for docker run.

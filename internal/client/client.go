@@ -491,6 +491,7 @@ type DeploymentImageParams struct {
 type DeploymentConfig struct {
 	ServerID             string          `json:"server_id,omitempty"`
 	SwarmID              string          `json:"swarm_id,omitempty"`
+	CustomName           *string         `json:"custom_name,omitempty"`
 	Image                DeploymentImage `json:"image"`
 	ImageRegistryAccount string          `json:"image_registry_account,omitempty"`
 	SkipSecretInterp     *bool           `json:"skip_secret_interp,omitempty"`
