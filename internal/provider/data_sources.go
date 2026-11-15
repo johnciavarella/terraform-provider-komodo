@@ -150,15 +150,16 @@ var _ datasource.DataSource = &StackDataSource{}
 type StackDataSource struct{ client *client.Client }
 
 type StackDataSourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	ServerID    types.String `tfsdk:"server_id"`
-	SwarmID     types.String `tfsdk:"swarm_id"`
-	LinkedRepo  types.String `tfsdk:"linked_repo"`
-	ProjectName types.String `tfsdk:"project_name"`
-	Repo        types.String `tfsdk:"repo"`
-	Branch      types.String `tfsdk:"branch"`
-	GitProvider types.String `tfsdk:"git_provider"`
+	ID             types.String `tfsdk:"id"`
+	Name           types.String `tfsdk:"name"`
+	ServerID       types.String `tfsdk:"server_id"`
+	SwarmID        types.String `tfsdk:"swarm_id"`
+	LinkedRepo     types.String `tfsdk:"linked_repo"`
+	ProjectName    types.String `tfsdk:"project_name"`
+	Repo           types.String `tfsdk:"repo"`
+	Branch         types.String `tfsdk:"branch"`
+	GitProvider    types.String `tfsdk:"git_provider"`
+	IgnoreServices types.List   `tfsdk:"ignore_services"`
 }
 
 func NewStackDataSource() datasource.DataSource { return &StackDataSource{} }
@@ -180,6 +181,11 @@ func (d *StackDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 			"repo":         schema.StringAttribute{Computed: true},
 			"branch":       schema.StringAttribute{Computed: true},
 			"git_provider": schema.StringAttribute{Computed: true},
+			"ignore_services": schema.ListAttribute{
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Services excluded from stack health status checks.",
+			},
 		},
 	}
 }
@@ -218,6 +224,13 @@ func (d *StackDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	config.Repo = types.StringValue(stack.Config.Repo)
 	config.Branch = types.StringValue(stack.Config.Branch)
 	config.GitProvider = types.StringValue(stack.Config.GitProvider)
+
+	ignoreServices, diags := types.ListValueFrom(ctx, types.StringType, stack.Config.IgnoreServices)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	config.IgnoreServices = ignoreServices
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
