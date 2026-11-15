@@ -575,3 +575,107 @@ resource "komodo_builder" "x" {
 		},
 	})
 }
+
+// Values Komodo would rewrite or reject are caught at plan time, before any
+// API call.
+func TestFieldValidation(t *testing.T) {
+	requireTerraform(t)
+	f, srv := newFakeKomodo(t)
+	server := func(window string) string {
+		return "resource \"komodo_server\" \"s\" {\n  name = \"s\"\n  address = \"https://h:8120\"\n  maintenance_windows = [" + window + "]\n}"
+	}
+	cases := map[string]struct{ config, wantErr string }{
+		"custom_name with space": {`resource "komodo_deployment" "d" {
+  name        = "d"
+  image       = "nginx"
+  custom_name = "my app"
+}`, `Invalid custom_name`},
+		"custom_name leading dash": {`resource "komodo_deployment" "d" {
+  name        = "d"
+  image       = "nginx"
+  custom_name = "-app"
+}`, `Invalid custom_name`},
+		"requires lower case": {`resource "komodo_stack" "s" {
+  name         = "s"
+  config_files = [{ path = "a.conf", requires = "restart" }]
+}`, `Invalid requires value`},
+		"window hour":      {server(`{ name = "w", hour = 24, duration_minutes = 10 }`), `Invalid hour`},
+		"window minute":    {server(`{ name = "w", minute = 60, duration_minutes = 10 }`), `Invalid minute`},
+		"window duration":  {server(`{ name = "w", duration_minutes = 0 }`), `Invalid duration_minutes`},
+		"window type":      {server(`{ name = "w", schedule_type = "Monthly", duration_minutes = 10 }`), `Invalid schedule_type`},
+		"weekly no day":    {server(`{ name = "w", schedule_type = "Weekly", duration_minutes = 10 }`), `Missing day_of_week`},
+		"onetime no date":  {server(`{ name = "w", schedule_type = "OneTime", duration_minutes = 10 }`), `Invalid date`},
+		"onetime bad date": {server(`{ name = "w", schedule_type = "OneTime", date = "01/02/2027", duration_minutes = 10 }`), `Invalid date`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{{
+					Config:      f.providerConfig(srv.URL) + c.config,
+					ExpectError: regexp.MustCompile(c.wantErr),
+				}},
+			})
+		})
+	}
+	if len(f.requests) != 0 {
+		t.Errorf("invalid configs reached the API: %v", f.requests)
+	}
+}
+
+// A builder with several servers set in the Komodo UI keeps them when
+// Terraform changes something other than server_id.
+func TestLifecycleBuilderKeepsExtraServers(t *testing.T) {
+	requireTerraform(t)
+	f, srv := newFakeKomodo(t)
+	cfg := func(name, server string) string {
+		return f.providerConfig(srv.URL) + fmt.Sprintf(`
+resource "komodo_builder" "b" {
+  name      = %q
+  server_id = %q
+  tags      = ["build"]
+}`, name, server)
+	}
+	servers := func() string {
+		params, _ := f.config("Builder")["params"].(map[string]interface{})
+		b, _ := json.Marshal(params["server_ids"])
+		return string(b)
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             f.checkEmpty(t),
+		Steps: []resource.TestStep{
+			{Config: cfg("builders", "srv-a")},
+			{ // a second server added in the UI; Terraform only renames
+				PreConfig: func() {
+					f.mu.Lock()
+					f.config("Builder")["params"].(map[string]interface{})["server_ids"] = []interface{}{"srv-a", "srv-b"}
+					f.mu.Unlock()
+				},
+				Config: cfg("builders-renamed", "srv-a"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("komodo_builder.b", "name", "builders-renamed"),
+					resource.TestCheckResourceAttr("komodo_builder.b", "server_id", "srv-a"),
+					f.check(func() error {
+						if got := servers(); got != `["srv-a","srv-b"]` {
+							return fmt.Errorf("rename dropped the extra server: %s", got)
+						}
+						return nil
+					}),
+				),
+			},
+			{ // changing server_id does replace the list
+				Config: cfg("builders-renamed", "srv-c"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("komodo_builder.b", "server_id", "srv-c"),
+					f.check(func() error {
+						if got := servers(); got != `["srv-c"]` {
+							return fmt.Errorf("server_ids = %s, want [\"srv-c\"]", got)
+						}
+						return nil
+					}),
+				),
+			},
+		},
+	})
+}
