@@ -55,6 +55,7 @@ resource "komodo_deployment" "nginx" {
 - `network` (String) Docker network to connect to.
 - `poll_for_updates` (Boolean) Poll the configured registry for newer image digests.
 - `ports` (String) Port mappings, newline-separated (e.g., "8080:80\n9090:90").
+- `redeploy_on_build` (Boolean) Redeploy the deployment whenever its attached Komodo build finishes. Only applies when image_type is "Build".
 - `replicas` (Number) Number of replicas for swarm-mode deployments. Ignored for plain Docker.
 - `restart_mode` (String) Restart policy (e.g., unless-stopped, always, on-failure, no).
 - `send_alerts` (Boolean) Whether to send deployment state change alerts.

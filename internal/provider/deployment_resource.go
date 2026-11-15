@@ -50,6 +50,7 @@ type DeploymentResourceModel struct {
 	Command              types.String `tfsdk:"command"`
 	SendAlerts           types.Bool   `tfsdk:"send_alerts"`
 	AutoUpdate           types.Bool   `tfsdk:"auto_update"`
+	RedeployOnBuild      types.Bool   `tfsdk:"redeploy_on_build"`
 	Ports                types.String `tfsdk:"ports"`
 	Volumes              types.String `tfsdk:"volumes"`
 	Environment          types.String `tfsdk:"environment"`
@@ -185,6 +186,12 @@ func (r *DeploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"redeploy_on_build": schema.BoolAttribute{
+				Description: "Redeploy the deployment whenever its attached Komodo build finishes. Only applies when image_type is \"Build\".",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
 			"ports": schema.StringAttribute{
 				Description: "Port mappings, newline-separated (e.g., \"8080:80\\n9090:90\").",
 				Optional:    true,
@@ -278,6 +285,7 @@ func deploymentConfigFromModel(ctx context.Context, m *DeploymentResourceModel) 
 		Labels:               m.Labels.ValueString(),
 		SendAlerts:           client.BoolPtr(m.SendAlerts.ValueBool()),
 		AutoUpdate:           client.BoolPtr(m.AutoUpdate.ValueBool()),
+		Redeploy:             client.BoolPtr(m.RedeployOnBuild.ValueBool()),
 	}
 	if !m.Replicas.IsNull() && !m.Replicas.IsUnknown() {
 		cfg.Replicas = client.IntPtr(int(m.Replicas.ValueInt64()))
@@ -321,6 +329,11 @@ func mapDeploymentToModel(ctx context.Context, c *client.Client, d *client.Deplo
 	}
 	if d.Config.AutoUpdate != nil {
 		m.AutoUpdate = types.BoolValue(*d.Config.AutoUpdate)
+	}
+	if d.Config.Redeploy != nil {
+		m.RedeployOnBuild = types.BoolValue(*d.Config.Redeploy)
+	} else {
+		m.RedeployOnBuild = types.BoolValue(false)
 	}
 	if d.Config.SkipSecretInterp != nil {
 		m.SkipSecretInterp = types.BoolValue(*d.Config.SkipSecretInterp)
